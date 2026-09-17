@@ -8,7 +8,7 @@ Target framework: `.NET 10`
 
 ## Installation
 
-The first release is being prepared. Once published, install it from NuGet:
+Install the published package from NuGet:
 
 ```powershell
 dotnet add package HelperLib.Discord
@@ -28,7 +28,7 @@ Breaking changes must be listed in the changelog below.
 
 ### 1.0.0
 
-Released: in progress
+Released: 2026-09-17
 
 Initial release of the `HelperLib.Discord` package:
 
@@ -171,12 +171,18 @@ default branch.
 5. Merge the version PR after `build-test-pack` passes. If the base has changed,
    update the release branch and rerun CI before merging.
 6. Run `Release package` on the default branch. It validates the merged version
-   and dated changelog, builds, tests, packs, publishes, and tags that commit.
+   and dated changelog, builds, tests, packs, publishes to NuGet, and tags that
+   commit. It then creates a GitHub Release with automatically generated notes
+   and the `.nupkg` attached under Assets.
 
 Publishing uses GitHub OIDC to obtain a short-lived NuGet credential. No
 long-lived NuGet API key is stored in GitHub. Publishing is manually dispatched;
 merging a PR does not publish a package. A failed tag push can be retried on the
 same commit; an existing version tag pointing at a different commit is rejected.
+GitHub Release creation can also be retried: missing assets are uploaded without
+overwriting existing ones, and an interrupted draft is published after upload.
+Packages are hosted on NuGet.org, not GitHub Packages. Check the `Release package`
+workflow, the repository's Releases page, and NuGet.org to verify publication.
 
 The repository, NuGet package, assembly, and root namespace are all named
 `HelperLib.Discord`.

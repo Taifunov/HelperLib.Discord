@@ -1,6 +1,8 @@
 $ErrorActionPreference = 'Stop'
+$originalExitCode = $global:LASTEXITCODE
 $prepare = Join-Path $PSScriptRoot 'Prepare-Release.ps1'
 $validate = Join-Path $PSScriptRoot 'Validate-Release.ps1'
+$publish = Join-Path $PSScriptRoot 'Publish-GitHubRelease.ps1'
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('helperlib-release-test-' + [guid]::NewGuid())
 $null = New-Item -ItemType Directory -Path $fixture
 Push-Location $fixture
@@ -31,9 +33,43 @@ try {
     if (!$rejected -or [IO.File]::ReadAllText((Join-Path $fixture 'HelperLib.Discord.csproj')) -ne $before) {
         throw 'Missing changelog must fail without changing the project.'
     }
-    Write-Host 'Release checks passed: all bump modes, unprepared release rejection, repeated preparation rejection, missing changelog, LF.'
+    $null = New-Item -ItemType Directory -Path artifacts
+    [IO.File]::WriteAllText((Join-Path $fixture 'artifacts/HelperLib.Discord.1.0.0.nupkg'), 'test package')
+    # Shadow the CLI so these checks never contact GitHub or publish anything.
+    function gh {
+        $calls.Add(($args -join ' '))
+        $global:LASTEXITCODE = 0
+        if ($args[1] -eq 'view') {
+            $global:LASTEXITCODE = $case.ViewExit
+            $case.Json
+        } elseif ($case.FailWrite) { $global:LASTEXITCODE = 1 }
+    }
+    foreach ($case in @(
+        @{ ViewExit = 1; Json = ''; Expected = 'create' },
+        @{ ViewExit = 0; Json = '{"assets":[],"isDraft":false}'; Expected = 'upload' },
+        @{ ViewExit = 0; Json = '{"assets":[{"name":"HelperLib.Discord.1.0.0.nupkg"}],"isDraft":false}'; Expected = 'none' },
+        @{ ViewExit = 0; Json = '{"assets":[],"isDraft":true}'; Expected = 'edit' },
+        @{ ViewExit = 1; Json = ''; Expected = 'create'; FailWrite = $true },
+        @{ ViewExit = 0; Json = '{"assets":[],"isDraft":true}'; Expected = 'upload'; FailWrite = $true }
+    )) {
+        $calls = [Collections.Generic.List[string]]::new()
+        $failed = $false
+        try { & $publish -Version '1.0.0' } catch { $failed = $true }
+        if ($failed -ne [bool]$case.FailWrite) { throw 'GitHub Release failure was not handled correctly.' }
+        if ($case.Expected -eq 'none') {
+            if ($calls.Count -ne 1) { throw 'Existing release asset must not be overwritten.' }
+        } elseif ($calls[-1] -notlike "release $($case.Expected) v1.0.0*") {
+            throw "Unexpected GitHub Release command: $($calls[-1])"
+        }
+        if ($case.Expected -eq 'create' -and $calls[-1] -notlike '*--verify-tag --title v1.0.0 --generate-notes') {
+            throw 'Release must use the existing tag and generate notes.'
+        }
+    }
+    Write-Host 'Release checks passed: version preparation, validation, LF, GitHub Release creation, retries and failures.'
 }
 finally {
+    # Mocked CLI failures must not leak into the GitHub Actions shell exit code.
+    $global:LASTEXITCODE = $originalExitCode
     Pop-Location
     $resolved = [IO.Path]::GetFullPath($fixture)
     if ([IO.Path]::GetDirectoryName($resolved).TrimEnd([IO.Path]::DirectorySeparatorChar) -eq [IO.Path]::GetTempPath().TrimEnd([IO.Path]::DirectorySeparatorChar) -and
