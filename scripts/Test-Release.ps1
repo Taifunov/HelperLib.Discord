@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+$originalExitCode = $global:LASTEXITCODE
 $prepare = Join-Path $PSScriptRoot 'Prepare-Release.ps1'
 $validate = Join-Path $PSScriptRoot 'Validate-Release.ps1'
 $publish = Join-Path $PSScriptRoot 'Publish-GitHubRelease.ps1'
@@ -67,6 +68,8 @@ try {
     Write-Host 'Release checks passed: version preparation, validation, LF, GitHub Release creation, retries and failures.'
 }
 finally {
+    # Mocked CLI failures must not leak into the GitHub Actions shell exit code.
+    $global:LASTEXITCODE = $originalExitCode
     Pop-Location
     $resolved = [IO.Path]::GetFullPath($fixture)
     if ([IO.Path]::GetDirectoryName($resolved).TrimEnd([IO.Path]::DirectorySeparatorChar) -eq [IO.Path]::GetTempPath().TrimEnd([IO.Path]::DirectorySeparatorChar) -and
