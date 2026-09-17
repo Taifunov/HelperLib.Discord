@@ -1,0 +1,59 @@
+name: Prepare release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Finalize the current version or bump it
+        required: true
+        type: choice
+        options:
+          - current
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Prepare version and changelog
+        id: version
+        shell: pwsh
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          $version = ./scripts/Prepare-Release.ps1 -Bump $env:BUMP
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Open release PR and run CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          branch="release/v$VERSION"
+          git switch -c "$branch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add HelperLib.Discord.csproj README.md
+          git commit -m "chore: prepare v$VERSION"
+          git push origin "$branch"
+          gh pr create --base "$DEFAULT_BRANCH" --head "$branch" \
+            --title "Release v$VERSION" \
+            --body 'Updates the package version and finalizes its changelog. Merge after CI passes, then run Release package on the default branch.'
+          # Explicit dispatch also works when bot-created PR events need approval.
+          gh workflow run ci.yml --ref "$branch"

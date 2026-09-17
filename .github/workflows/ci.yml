@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore HelperLib.Discord.sln
+
+      - name: Verify release scripts
+        shell: pwsh
+        run: ./scripts/Test-Release.ps1
+
+      - name: Build
+        run: dotnet build HelperLib.Discord.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test HelperLib.Discord.Tests/HelperLib.Discord.Tests.csproj --configuration Release --no-restore --no-build
+
+      - name: Pack
+        run: dotnet pack HelperLib.Discord.csproj --configuration Release --no-restore --no-build --output artifacts

@@ -1,0 +1,80 @@
+name: Release package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Verify merged release version
+        id: version
+        shell: pwsh
+        run: |
+          $version = ./scripts/Validate-Release.ps1
+          $tag = "v$version"
+          $existing = git tag --list $tag
+          if ($existing) {
+            $tagCommit = git rev-list -n 1 $tag
+            if ($tagCommit -ne $env:GITHUB_SHA) {
+              throw 'This version tag already belongs to a different commit.'
+            }
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Restore
+        run: dotnet restore HelperLib.Discord.sln
+
+      - name: Build
+        run: dotnet build HelperLib.Discord.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test HelperLib.Discord.Tests/HelperLib.Discord.Tests.csproj --configuration Release --no-restore --no-build
+
+      - name: Pack
+        run: dotnet pack HelperLib.Discord.csproj --configuration Release --no-restore --no-build --output artifacts
+
+      - name: Log in to NuGet
+        id: nuget-login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
+        with:
+          user: Taifunov
+
+      - name: Publish to NuGet
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: >-
+          dotnet nuget push "artifacts/HelperLib.Discord.$VERSION.nupkg"
+          --api-key "$NUGET_API_KEY"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+      - name: Tag released commit
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if ! git show-ref --verify --quiet "refs/tags/$TAG"; then
+            git tag "$TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$TAG"
+          fi

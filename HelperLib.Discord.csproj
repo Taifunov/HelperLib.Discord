@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<LangVersion>latest</LangVersion>
+		<Nullable>enable</Nullable>
+		<Version>1.0.0</Version>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<RepositoryUrl>https://github.com/Taifunov/HelperLib.Discord</RepositoryUrl>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Compile Remove="HelperLib.Discord.Tests\**" />
+		<EmbeddedResource Remove="HelperLib.Discord.Tests\**" />
+		<None Remove="HelperLib.Discord.Tests\**" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Discord.Net" Version="3.20.1" />
+		<PackageReference Include="Discord.Net.Commands" Version="3.20.1" />
+		<PackageReference Include="Discord.Net.WebSocket" Version="3.20.1" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Folder Include="Services\" />
+		<Folder Include="Preconditions\" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="README.md" Pack="true" PackagePath="\" />
+		<None Include="LICENSE" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+			<_Parameter1>HelperLib.Discord.Tests</_Parameter1>
+		</AssemblyAttribute>
+	</ItemGroup>
+
+</Project>
