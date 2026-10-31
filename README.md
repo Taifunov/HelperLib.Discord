@@ -36,6 +36,7 @@ Released: in progress
 - Breaking: log output goes through `Microsoft.Extensions.Logging.ILogger` instead of `Console.WriteLine`, and the console text format changed (new wording, no fixed colors except red for errors).
 - Breaking: the `Extensions` methods now throw argument exceptions at the call instead of from the returned task.
 - Breaking: `GuildLookup.GetGuildUserAsync` and `GetGuildUsersByIdAsync` gained an optional trailing `CancellationToken`. The change is source-compatible but binary-breaking, so consumers must recompile against 2.0.0.
+- Breaking: `IonicHelper` is now `sealed`. Code that derives from it must use composition instead.
 - Fixed: the reconnect watchdog now terminates the process as soon as the restart task faults while it waits for the client to reconnect, instead of waiting for the timeout.
 - Fixed: `SendImageAsync` no longer throws `InvalidCastException` for DM and other non-text channels. The public `SendEmbedAsync` and `SendImageAsync` methods now throw `ArgumentNullException` or `ArgumentException` for null or blank arguments.
 - Fixed: attaching `IonicHelper` to a client again unsubscribes the previous client's watchdog handlers instead of doubling them. The watchdog's reconnect token source is now thread-safe, and an exception in the disconnect handler is logged instead of lost. `RunAsync` and `AttachToExistingClient` now throw `ArgumentNullException` for null `config`, `logger` and `client`.
@@ -43,6 +44,7 @@ Released: in progress
 - Added: `IonicHelper` constructors accept an optional trailing `ILogger`; the helper, its reconnect watchdog and `GuildLookup` log structured messages with constant templates to it. Without a logger, the output stays on the console. `GuildLookup` is static, so it uses the logger of the last `IonicHelper` constructed with one. The change is source-compatible but binary-breaking, so consumers must recompile against 2.0.0.
 - Added: `SendImageAsync` accepts an optional trailing `CancellationToken` that cancels the download and the upload. The change is source-compatible but binary-breaking, so consumers must recompile against 2.0.0.
 - Added: `IonicHelper` implements `IDisposable`. `Dispose()` unsubscribes the reconnect watchdog from the attached client, cancels any pending reconnect wait and releases the watchdog's resources; it does not dispose the client. `RunAsync` and `AttachToExistingClient` throw `ObjectDisposedException` after `Dispose()`.
+- Added: NuGet package metadata (authors, description, tags, project URL, repository) and a symbol package (`.snupkg`) with SourceLink, so debuggers can step into the library source.
 - Changed: `GuildLookup.GetEmote` matches names with `OrdinalIgnoreCase` (was `InvariantCultureIgnoreCase`).
 - Build: warnings are now treated as errors, and the package ships its XML documentation.
 

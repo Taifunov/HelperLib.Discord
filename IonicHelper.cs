@@ -11,7 +11,7 @@ namespace HelperLib.Discord;
 /// process-wide <see cref="DiscordSocketClient"/> and watches it with a reconnect watchdog that
 /// backstops Discord.Net's own reconnect logic. There is one client per process.
 /// </summary>
-public class IonicHelper : IDisposable
+public sealed class IonicHelper : IDisposable
 {
     private static CancellationTokenSource? _tokenSource;
     private readonly string _token;
@@ -178,7 +178,6 @@ public class IonicHelper : IDisposable
         _disposed = true;
         DetachClient();
         _watchdog.Dispose();
-        GC.SuppressFinalize(this);
     }
 
     private void DetachClient()
