@@ -1,6 +1,6 @@
+using global::Discord;
 using global::Discord.Commands;
 using global::Discord.WebSocket;
-using global::Discord;
 using HelperLib.Discord.Util;
 
 namespace HelperLib.Discord.Preconditions;

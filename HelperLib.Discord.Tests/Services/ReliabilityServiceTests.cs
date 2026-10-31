@@ -195,7 +195,7 @@ public class ReliabilityServiceTests
         var service = new ReliabilityService(
             getConnectionState: () => ConnectionState.Disconnected,
             startAsync: () => Task.FromException(new InvalidOperationException("boom")),
-            delayWithCancellationAsync: (_, _) => Task.Delay(Timeout.InfiniteTimeSpan),
+            delayWithCancellationAsync: (_, _) => Task.Delay(Timeout.InfiniteTimeSpan, CancellationToken.None),
             delayAsync: _ => Task.Delay(Timeout.InfiniteTimeSpan),
             writeLine: _ => { },
             terminate: terminationMessages.Add,
@@ -213,7 +213,7 @@ public class ReliabilityServiceTests
         var service = new ReliabilityService(
             getConnectionState: () => ConnectionState.Disconnected,
             startAsync: () => throw new InvalidOperationException("boom"),
-            delayWithCancellationAsync: (_, _) => Task.Delay(Timeout.InfiniteTimeSpan),
+            delayWithCancellationAsync: (_, _) => Task.Delay(Timeout.InfiniteTimeSpan, CancellationToken.None),
             delayAsync: _ => Task.Delay(Timeout.InfiniteTimeSpan),
             writeLine: _ => { },
             terminate: terminationMessages.Add,

@@ -1,0 +1,62 @@
+root = true
+
+[*]
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+[*.{csproj,props,targets,json,yml,yaml,md}]
+indent_size = 2
+[*.cs]
+dotnet_sort_system_directives_first = true
+csharp_new_line_before_open_brace = all
+csharp_using_directive_placement = outside_namespace:warning
+dotnet_style_qualification_for_field = false:warning
+dotnet_style_qualification_for_property = false:warning
+dotnet_style_qualification_for_method = false:warning
+dotnet_style_qualification_for_event = false:warning
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:warning
+dotnet_style_predefined_type_for_locals_parameters_members = true:warning
+dotnet_style_readonly_field = true:warning
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_prefer_braces = true:warning
+csharp_style_var_when_type_is_apparent = true:warning
+csharp_preferred_modifier_order = public,private,protected,internal,file,static,extern,new,virtual,abstract,sealed,override,readonly,unsafe,required,volatile,async:warning
+dotnet_diagnostic.IDE0040.severity = warning
+dotnet_style_allow_multiple_blank_lines_experimental = false:warning
+dotnet_diagnostic.IDE2000.severity = warning
+dotnet_naming_rule.constants_pascal_case.symbols = constants
+dotnet_naming_rule.constants_pascal_case.style = pascal_case
+dotnet_naming_rule.constants_pascal_case.severity = warning
+dotnet_naming_symbols.constants.applicable_kinds = field
+dotnet_naming_symbols.constants.required_modifiers = const
+dotnet_naming_rule.static_readonly_pascal_case.symbols = static_readonly_fields
+dotnet_naming_rule.static_readonly_pascal_case.style = pascal_case
+dotnet_naming_rule.static_readonly_pascal_case.severity = warning
+dotnet_naming_symbols.static_readonly_fields.applicable_kinds = field
+dotnet_naming_symbols.static_readonly_fields.required_modifiers = static, readonly
+dotnet_naming_style.pascal_case.capitalization = pascal_case
+dotnet_naming_rule.private_fields_underscore.symbols = private_fields
+dotnet_naming_rule.private_fields_underscore.style = underscore_camel_case
+dotnet_naming_rule.private_fields_underscore.severity = warning
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.underscore_camel_case.required_prefix = _
+dotnet_naming_style.underscore_camel_case.capitalization = camel_case
+# Diagnostics set to error (IDE* rules are enforced by dotnet format, not by dotnet build).
+[*.cs]
+dotnet_diagnostic.CS4014.severity = error
+dotnet_diagnostic.CS1998.severity = error
+dotnet_diagnostic.CS0219.severity = error
+dotnet_diagnostic.CS0114.severity = error
+dotnet_diagnostic.CS8603.severity = error
+dotnet_diagnostic.CS8605.severity = error
+dotnet_diagnostic.CS8629.severity = error
+dotnet_diagnostic.CA2016.severity = error
+dotnet_diagnostic.CA2017.severity = error
+dotnet_diagnostic.CA2200.severity = error
+dotnet_diagnostic.CA2254.severity = error
+dotnet_diagnostic.IDE0005.severity = error
+dotnet_diagnostic.IDE0044.severity = error
+dotnet_diagnostic.IDE0161.severity = error
+dotnet_diagnostic.IDE1006.severity = error

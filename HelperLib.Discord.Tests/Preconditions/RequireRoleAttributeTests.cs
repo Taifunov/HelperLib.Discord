@@ -2,7 +2,6 @@ using global::Discord;
 using HelperLib.Discord.Preconditions;
 using Moq;
 using ICommandContext = Discord.Commands.ICommandContext;
-using CommandInfo = Discord.Commands.CommandInfo;
 
 namespace HelperLib.Discord.Tests.Preconditions;
 
