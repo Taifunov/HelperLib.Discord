@@ -54,6 +54,6 @@ jobs:
           git push origin "$branch"
           gh pr create --base "$DEFAULT_BRANCH" --head "$branch" \
             --title "Release v$VERSION" \
-            --body 'Updates the package version and finalizes its changelog. Merge after CI passes, then run Release package on the default branch.'
+            --body 'Updates the package version and finalizes its changelog. Merge after CI passes. Release package then runs on the push to the default branch and publishes the package automatically.'
           # Explicit dispatch also works when bot-created PR events need approval.
           gh workflow run ci.yml --ref "$branch"

@@ -2,20 +2,72 @@ name: Release package
 
 on:
   workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - HelperLib.Discord.csproj
+      - README.md
 
 permissions:
   contents: write
   id-token: write
 
-concurrency:
-  group: release
-  cancel-in-progress: false
-
 jobs:
-  release:
+  gate:
     if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # A push runs this check for every change to the csproj or README, so it
+      # skips quietly when nothing is ready to publish. A manual run must fail instead.
+      - name: Verify merged release version
+        id: version
+        shell: pwsh
+        run: |
+          $manual = $env:GITHUB_EVENT_NAME -eq 'workflow_dispatch'
+          try {
+            $version = ./scripts/Validate-Release.ps1
+          } catch {
+            if ($manual) { throw }
+            Write-Output "::notice::No prepared release in this commit: $($_.Exception.Message)"
+            'publish=false' >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          $tag = "v$version"
+          $existing = git tag --list $tag
+          if ($existing) {
+            $tagCommit = git rev-list -n 1 $tag
+            if ($tagCommit -ne $env:GITHUB_SHA) {
+              if ($manual) { throw 'This version tag already belongs to a different commit.' }
+              Write-Output "::notice::$tag is already released."
+              'publish=false' >> $env:GITHUB_OUTPUT
+              exit 0
+            }
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          'publish=true' >> $env:GITHUB_OUTPUT
+
+  release:
+    needs: gate
+    if: needs.gate.outputs.publish == 'true'
+    runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      group: release
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -25,22 +77,6 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: 10.0.x
-
-      - name: Verify merged release version
-        id: version
-        shell: pwsh
-        run: |
-          $version = ./scripts/Validate-Release.ps1
-          $tag = "v$version"
-          $existing = git tag --list $tag
-          if ($existing) {
-            $tagCommit = git rev-list -n 1 $tag
-            if ($tagCommit -ne $env:GITHUB_SHA) {
-              throw 'This version tag already belongs to a different commit.'
-            }
-          }
-          "version=$version" >> $env:GITHUB_OUTPUT
-          "tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Restore
         run: dotnet restore HelperLib.Discord.sln
@@ -63,7 +99,7 @@ jobs:
       - name: Publish to NuGet
         env:
           NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.gate.outputs.version }}
         run: >-
           dotnet nuget push "artifacts/HelperLib.Discord.$VERSION.nupkg"
           --api-key "$NUGET_API_KEY"
@@ -72,7 +108,7 @@ jobs:
 
       - name: Tag released commit
         env:
-          TAG: ${{ steps.version.outputs.tag }}
+          TAG: ${{ needs.gate.outputs.tag }}
         run: |
           if ! git show-ref --verify --quiet "refs/tags/$TAG"; then
             git tag "$TAG" "$GITHUB_SHA"
@@ -84,5 +120,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.gate.outputs.version }}
         run: ./scripts/Publish-GitHubRelease.ps1 -Version $env:VERSION
