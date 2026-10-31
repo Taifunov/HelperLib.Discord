@@ -31,6 +31,12 @@ Run tests with coverage:
 dotnet test HelperLib.Discord.Tests\HelperLib.Discord.Tests.csproj --no-restore --collect:"XPlat Code Coverage"
 ```
 
+Run the integration tests against a real guild (they are skipped without a token; see Testing):
+```powershell
+dotnet user-secrets set "HelperLibDiscord:Token" "<token>" --project HelperLib.Discord.Tests
+dotnet test HelperLib.Discord.Tests\HelperLib.Discord.Tests.csproj --no-restore --filter "FullyQualifiedName~Integration"
+```
+
 Check code style before you report a task done (CI fails on any violation; drop `--verify-no-changes` to fix what can be fixed automatically). The root `.editorconfig` defines the rules, and `dotnet build` does not check the code-style ones:
 ```powershell
 dotnet format HelperLib.Discord.sln --verify-no-changes
@@ -75,7 +81,10 @@ Discord.Net's `ConnectionManager` has its own internal reconnect logic (heartbea
 
 ## Testing
 
-- xUnit + Moq, no real Gateway/network calls.
+- xUnit + Moq, no real Gateway/network calls, except the opt-in integration tests below.
+- `HelperLib.Discord.Tests/Integration/` runs `GuildLookup` against a real guild, for the Discord.Net lookups that unit tests cannot reach (`SocketGuild` is sealed with an internal constructor) and for each lookup's missing-target warning. `IntegrationFactAttribute` skips a test when no bot token is configured, so plain `dotnet test` and CI make no network call. The integration tests are local only, use a dev bot token, and are not run in CI by design. `DiscordGuildFixture` logs in once for the whole `Discord guild` collection and never starts the reconnect watchdog, which could end the test process.
+- Integration settings (`IntegrationSettings`): token from the environment variable `HELPERLIB_DISCORD_TOKEN` or the user secret `HelperLibDiscord:Token`; guild id from `HELPERLIB_DISCORD_GUILD_ID` or `HelperLibDiscord:GuildId`, default `872032510962446346`. The bot must be a member of that guild, and the privileged **Server Members Intent** (`GuildMembers`) must be enabled for it in the Discord developer portal. Without that intent the member download does not finish and the fixture fails after 60 s with a message that names it. An invalid guild id setting throws an `InvalidOperationException` that names the setting keys. A malformed user-secrets file does not break test discovery: the integration tests are skipped and the error text is the skip reason.
+- Integration tests take channel, role and emote ids from the guild itself. When the guild has no channel or emote of a kind, that test returns early and writes a note to the test output.
 - `Microsoft.Extensions.Time.Testing.FakeTimeProvider` replaces the clock. `WatchdogHarness` wires a `ReconnectWatchdog` and a `ProcessTerminator` to a fake clock, a `Mock<IDiscordClient>`, a mocked `IHostApplicationLifetime` and a fake `ProcessExit`, with the default option values. The harness clock is a `SteppingTimeProvider`, which counts the timers it creates and fires. `Task.Delay` resumes its caller asynchronously, so use `Time.AdvanceAsync(duration, watchedTask)` / `AdvanceUntilCompletedAsync` (`FakeTimeProviderExtensions`) when code polls the clock: they move time one second at a time and, after a timer fires, wait until the watched code registers its next timer or completes. Use plain `Time.Advance` when nothing awaits a delay.
 - `FakeClientEvents` implements the `ClientEvents` seam, so tests raise `Connected`, `Disconnected` and `LatencyUpdated` without a gateway.
 - The `ProcessExit` seam records the exit code and the hard exit, so no test ends the test process.

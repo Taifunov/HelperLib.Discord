@@ -239,6 +239,15 @@ Run tests with coverage:
 dotnet test HelperLib.Discord.Tests\HelperLib.Discord.Tests.csproj --no-restore --collect:"XPlat Code Coverage" -v q
 ```
 
+The integration tests in `HelperLib.Discord.Tests/Integration` run the guild lookups against a real Discord guild. They are skipped unless a bot token is set, so a plain `dotnet test` makes no network call. They are local only, use a dev bot token, and are not run in CI by design. The bot needs the privileged Server Members Intent in the Discord developer portal; without it the member download times out after 60 s and the tests fail with a message that names the intent. To run them:
+
+```powershell
+dotnet user-secrets set "HelperLibDiscord:Token" "<token>" --project HelperLib.Discord.Tests
+dotnet test HelperLib.Discord.Tests\HelperLib.Discord.Tests.csproj --no-restore --filter "FullyQualifiedName~Integration"
+```
+
+You can also set the token in the `HELPERLIB_DISCORD_TOKEN` environment variable, and the guild id in `HELPERLIB_DISCORD_GUILD_ID` or the user secret `HelperLibDiscord:GuildId`.
+
 ## Code style
 
 The root `.editorconfig` sets the formatting, naming and analyzer rules for all C# code. Visual Studio, Rider and VS Code (C# Dev Kit) apply it while you edit.
