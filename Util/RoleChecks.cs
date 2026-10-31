@@ -48,20 +48,4 @@ public static class RoleChecks
     /// <returns><see langword="true"/> when the member holds all of the roles, including when <paramref name="roleIds"/> is empty.</returns>
     public static bool HasRolesAll(SocketGuildUser sgUser, params ReadOnlySpan<ulong> roleIds) =>
         HasRolesAll(sgUser.Roles, roleIds);
-
-    /// <summary>Checks whether a cached guild member holds at least one of the roles.</summary>
-    /// <param name="guildId">The guild id; the default guild when <see langword="null"/>.</param>
-    /// <param name="userId">The user id.</param>
-    /// <param name="roleIds">The role ids to look for.</param>
-    /// <returns><see langword="true"/> when the member was found and holds any of the roles; <see langword="false"/> when the member is not found.</returns>
-    public static bool HasRolesAny(ulong? guildId, ulong userId, params ReadOnlySpan<ulong> roleIds) =>
-        GuildLookup.GetGuildUserById(guildId, userId, out var user) && HasRolesAny(user!, roleIds);
-
-    /// <summary>Checks whether a cached guild member holds every one of the roles.</summary>
-    /// <param name="guildId">The guild id; the default guild when <see langword="null"/>.</param>
-    /// <param name="userId">The user id.</param>
-    /// <param name="roleIds">The role ids to look for.</param>
-    /// <returns><see langword="true"/> when the member was found and holds all of the roles; <see langword="false"/> when the member is not found.</returns>
-    public static bool HasRolesAll(ulong? guildId, ulong userId, params ReadOnlySpan<ulong> roleIds) =>
-        GuildLookup.GetGuildUserById(guildId, userId, out var user) && HasRolesAll(user!, roleIds);
 }

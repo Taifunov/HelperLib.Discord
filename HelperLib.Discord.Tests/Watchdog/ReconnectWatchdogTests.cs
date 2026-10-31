@@ -1,626 +1,259 @@
 using Discord;
-using HelperLib.Discord.Util;
-using HelperLib.Discord.Watchdog;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 namespace HelperLib.Discord.Tests.Watchdog;
 
-[Collection(ConsoleAndStaticStateCollection.Name)]
 public class ReconnectWatchdogTests
 {
+    private static readonly TimeSpan ReconnectTimeout = TimeSpan.FromMinutes(1);
+
     [Fact]
-    public async Task ClientOnConnected_resets_reconnect_token()
+    public async Task ClientOnDisconnected_does_not_check_state_after_the_client_reconnects()
     {
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(1),
-            delayAsync: (_, _) => Task.CompletedTask,
-            failFast: () => { },
-            logger: NullLogger.Instance);
+        using var harness = new WatchdogHarness();
 
-        var firstToken = watchdog.GetReconnectCancellationToken();
+        var check = harness.Watchdog.ClientOnDisconnected();
+        await harness.Watchdog.ClientOnConnected();
+        await check;
+        harness.Time.Advance(ReconnectTimeout);
 
-        await watchdog.ClientOnConnected();
-
-        var secondToken = watchdog.GetReconnectCancellationToken();
-        Assert.True(firstToken.IsCancellationRequested);
-        Assert.False(secondToken.IsCancellationRequested);
+        harness.AssertNoRestartOrTermination();
     }
 
     [Fact]
-    public async Task ClientOnDisconnected_does_not_check_state_after_reconnect_resets_token()
+    public async Task ClientOnDisconnected_restarts_the_client_after_the_reconnect_timeout()
     {
-        var startCalls = 0;
-        var delayReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var client = CreateClient(ConnectionState.Disconnected, () =>
-        {
-            startCalls++;
-            return Task.CompletedTask;
-        });
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(1),
-            delayAsync: (_, _) => delayReleased.Task,
-            failFast: () => { },
-            logger: NullLogger.Instance);
+        using var harness = new WatchdogHarness();
+        harness.ConnectOnStart();
 
-        var disconnectedTask = watchdog.ClientOnDisconnected(client.Object);
-        await watchdog.ClientOnConnected();
-        delayReleased.SetResult();
-        await disconnectedTask;
+        var check = harness.Watchdog.ClientOnDisconnected();
+        await harness.Time.AdvanceAsync(ReconnectTimeout - TimeSpan.FromSeconds(1), check);
 
-        Assert.Equal(0, startCalls);
+        Assert.False(check.IsCompleted);
+        Assert.Equal(0, harness.StartCalls);
+
+        await harness.Time.AdvanceUntilCompletedAsync(check, TimeSpan.FromSeconds(5));
+
+        Assert.Equal(1, harness.StartCalls);
+        harness.VerifyProcessTerminationRequested(Times.Never());
+        Assert.True(harness.Logger.Entries.HasEntry(LogLevel.Information, "State came back okay"));
     }
 
     [Fact]
-    public async Task Dispose_cancels_pending_reconnect_wait_without_checking_state()
+    public async Task ClientOnDisconnected_while_a_check_is_running_is_dropped_and_logged()
     {
-        var startCalls = 0;
-        var failFastCalls = 0;
-        var client = CreateClient(ConnectionState.Disconnected, () =>
-        {
-            startCalls++;
-            return Task.CompletedTask;
-        });
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(1),
-            delayAsync: (_, token) => Task.Delay(Timeout.InfiniteTimeSpan, token),
-            failFast: () => failFastCalls++,
-            logger: NullLogger.Instance);
+        using var harness = new WatchdogHarness();
+        harness.ConnectOnStart();
 
-        var disconnectedTask = watchdog.ClientOnDisconnected(client.Object);
-        watchdog.Dispose();
-        await disconnectedTask;
+        var firstCheck = harness.Watchdog.ClientOnDisconnected();
+        await harness.Watchdog.ClientOnDisconnected();
+        await harness.Time.AdvanceUntilCompletedAsync(firstCheck, ReconnectTimeout + TimeSpan.FromSeconds(5));
 
-        Assert.Equal(0, startCalls);
-        Assert.Equal(0, failFastCalls);
+        Assert.Equal(1, harness.StartCalls);
+        Assert.Single(
+            harness.Logger.Entries,
+            entry => entry.Message == "Client disconnected again while a reconnect check is running, ignoring the duplicate.");
     }
 
     [Fact]
-    public async Task ClientOnDisconnected_while_a_check_is_running_is_dropped()
+    public async Task ClientOnDisconnected_after_Connected_starts_a_new_check_and_still_drops_duplicates_of_it()
     {
-        var delayCalls = 0;
-        var startCalls = 0;
-        var failFastCalls = 0;
-        var state = ConnectionState.Disconnected;
-        var timeoutWait = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var client = CreateClient(() => state, () =>
-        {
-            startCalls++;
-            state = ConnectionState.Connected;
-            return Task.CompletedTask;
-        });
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(1),
-            delayAsync: (_, _) =>
-            {
-                delayCalls++;
-                return timeoutWait.Task;
-            },
-            failFast: () => failFastCalls++,
-            logger: NullLogger.Instance);
-
-        var firstCheck = watchdog.ClientOnDisconnected(client.Object);
-        await watchdog.ClientOnDisconnected(client.Object);
-        timeoutWait.SetResult();
+        using var harness = new WatchdogHarness();
+        var firstCheck = harness.Watchdog.ClientOnDisconnected();
+        await harness.Watchdog.ClientOnConnected();
         await firstCheck;
 
-        Assert.Equal(1, delayCalls);
-        Assert.Equal(1, startCalls);
-        Assert.Equal(0, failFastCalls);
+        var secondCheck = harness.Watchdog.ClientOnDisconnected();
+        await harness.Watchdog.ClientOnDisconnected();
+
+        Assert.False(secondCheck.IsCompleted);
+        Assert.Single(harness.Logger.Entries, entry => entry.Message.StartsWith("Client disconnected again", StringComparison.Ordinal));
+        Assert.Equal(2, harness.Logger.Entries.Count(entry => entry.Message == "Client disconnected, starting timeout task..."));
+    }
+
+    [Fact]
+    public async Task ClientOnDisconnected_ends_the_process_when_the_client_stays_stuck_connecting()
+    {
+        using var harness = new WatchdogHarness(ConnectionState.Connecting);
+
+        var check = harness.Watchdog.ClientOnDisconnected();
+        await harness.Time.AdvanceUntilCompletedAsync(check, ReconnectTimeout + ReconnectTimeout + TimeSpan.FromSeconds(1));
+
+        Assert.Equal(0, harness.StartCalls);
+        harness.VerifyProcessTerminationRequested(Times.Once());
+        harness.TerminatorLogger.Entries.AssertSingleEntry(LogLevel.Critical, "Client stuck reconnecting. Killing process.");
+    }
+
+    [Fact]
+    public async Task Dispose_cancels_a_pending_reconnect_wait_without_checking_state()
+    {
+        using var harness = new WatchdogHarness();
+
+        var check = harness.Watchdog.ClientOnDisconnected();
+        harness.Watchdog.Dispose();
+        await check;
+        harness.Time.Advance(ReconnectTimeout);
+
+        harness.AssertNoRestartOrTermination();
+    }
+
+    [Fact]
+    public async Task Dispose_while_polling_stops_the_check_without_restarting_or_terminating()
+    {
+        using var harness = new WatchdogHarness(ConnectionState.Connecting);
+
+        var check = harness.Watchdog.ClientOnDisconnected();
+        await harness.Time.AdvanceAsync(ReconnectTimeout + TimeSpan.FromSeconds(3), check);
+        Assert.False(check.IsCompleted);
+        harness.Watchdog.Dispose();
+        await check;
+        harness.Time.Advance(ReconnectTimeout);
+
+        harness.AssertNoRestartOrTermination();
     }
 
     [Fact]
     public async Task ClientOnDisconnected_after_Dispose_logs_nothing_and_starts_no_check()
     {
-        var delayCalls = 0;
-        var logger = new ListLogger();
-        var client = CreateClient(ConnectionState.Disconnected, () => Task.CompletedTask);
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(1),
-            delayAsync: (_, _) =>
-            {
-                delayCalls++;
-                return Task.CompletedTask;
-            },
-            failFast: () => { },
-            logger: logger);
-        watchdog.Dispose();
+        using var harness = new WatchdogHarness();
+        harness.Watchdog.Dispose();
 
-        await watchdog.ClientOnDisconnected(client.Object);
+        await harness.Watchdog.ClientOnDisconnected();
+        harness.Time.Advance(ReconnectTimeout);
 
-        Assert.Equal(0, delayCalls);
-        Assert.Empty(logger.Entries);
+        Assert.Equal(0, harness.StartCalls);
+        Assert.Empty(harness.Logger.Entries);
     }
 
     [Fact]
-    public async Task ClientOnDisconnected_after_Connected_starts_a_new_check_before_the_cancelled_one_unwinds()
+    public async Task ClientOnConnected_after_Dispose_does_not_throw_and_logs_nothing()
     {
-        var delayCalls = 0;
-        var delays = new[]
-        {
-            new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
-            new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
-        };
-        var client = CreateClient(ConnectionState.Connected, () => Task.CompletedTask);
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(1),
-            // The first delay ignores cancellation, standing in for a check that has not unwound yet.
-            delayAsync: (_, _) => delays[Interlocked.Increment(ref delayCalls) - 1].Task,
-            failFast: () => { },
-            logger: NullLogger.Instance);
+        using var harness = new WatchdogHarness();
+        harness.Watchdog.Dispose();
 
-        var firstCheck = watchdog.ClientOnDisconnected(client.Object);
-        await watchdog.ClientOnConnected();
-        var secondCheck = watchdog.ClientOnDisconnected(client.Object);
+        var exception = await Record.ExceptionAsync(harness.Watchdog.ClientOnConnected);
 
-        Assert.Equal(2, delayCalls);
-
-        // The first check unwinding must not free the slot of the second one.
-        delays[0].SetResult();
-        await firstCheck;
-        await watchdog.ClientOnDisconnected(client.Object);
-
-        Assert.Equal(2, delayCalls);
-
-        delays[1].SetResult();
-        await secondCheck;
+        Assert.Null(exception);
+        Assert.Empty(harness.Logger.Entries);
     }
 
     [Fact]
-    public async Task Overlapping_events_and_Dispose_from_many_threads_never_throw_or_restart_the_client()
+    public async Task StartAsync_subscribes_to_the_client_events_and_StopAsync_unsubscribes()
     {
-        var startCalls = 0;
-        var failFastCalls = 0;
-        var client = CreateClient(ConnectionState.Disconnected, () =>
-        {
-            Interlocked.Increment(ref startCalls);
-            return Task.CompletedTask;
-        });
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(1),
-            // Only cancellation ends the wait, so no check can reach the state check.
-            delayAsync: (_, token) => Task.Delay(Timeout.InfiniteTimeSpan, token),
-            failFast: () => Interlocked.Increment(ref failFastCalls),
-            logger: NullLogger.Instance);
+        using var harness = new WatchdogHarness();
+        Assert.Equal(0, harness.Events.SubscriberCount);
+
+        await harness.StartAsync();
+        Assert.Equal(3, harness.Events.SubscriberCount);
+
+        await harness.Watchdog.StopAsync(CancellationToken.None);
+        Assert.Equal(0, harness.Events.SubscriberCount);
+    }
+
+    [Fact]
+    public async Task StartAsync_called_twice_subscribes_once()
+    {
+        using var harness = new WatchdogHarness();
+
+        await harness.StartAsync();
+        await harness.StartAsync();
+
+        Assert.Equal(3, harness.Events.SubscriberCount);
+    }
+
+    [Fact]
+    public async Task StartAsync_after_StopAsync_throws()
+    {
+        using var harness = new WatchdogHarness();
+        await harness.Watchdog.StopAsync(CancellationToken.None);
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(harness.StartAsync);
+    }
+
+    [Fact]
+    public async Task Disconnected_event_returns_to_the_gateway_at_once_and_the_check_runs_in_the_background()
+    {
+        using var harness = new WatchdogHarness();
+        harness.ConnectOnStart();
+        await harness.StartAsync();
+
+        var handlerTask = harness.Events.RaiseDisconnected();
+
+        Assert.True(handlerTask.IsCompletedSuccessfully);
+        Assert.Equal(0, harness.StartCalls);
+
+        harness.Time.Advance(ReconnectTimeout);
+        await WatchdogHarness.WaitUntilAsync(() => harness.StartCalls == 1);
+    }
+
+    [Fact]
+    public async Task Connected_event_cancels_the_check_started_by_the_Disconnected_event()
+    {
+        using var harness = new WatchdogHarness();
+        await harness.StartAsync();
+        await harness.Events.RaiseDisconnected();
+
+        await harness.Events.RaiseConnected();
+        harness.Time.Advance(ReconnectTimeout);
+
+        harness.AssertNoRestartOrTermination();
+    }
+
+    [Fact]
+    public async Task Disconnected_event_logs_a_failing_check_instead_of_throwing()
+    {
+        using var harness = new WatchdogHarness();
+        await harness.StartAsync();
+        harness.Client.Setup(client => client.ConnectionState).Throws(new InvalidOperationException("boom"));
+
+        await harness.Events.RaiseDisconnected();
+        harness.Time.Advance(ReconnectTimeout);
+
+        await WatchdogHarness.WaitUntilAsync(() => harness.Logger.Entries.Any(entry => entry.Level == LogLevel.Error));
+        var entry = Assert.Single(harness.Logger.Entries, entry => entry.Level == LogLevel.Error);
+        Assert.Equal("Reconnect watchdog failed.", entry.Message);
+        Assert.Equal("boom", entry.Exception?.Message);
+    }
+
+    [Fact]
+    public async Task Overlapping_events_and_StopAsync_from_many_threads_never_throw_or_restart_the_client()
+    {
+        using var harness = new WatchdogHarness();
+        await harness.StartAsync();
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var eventTasks = Enumerable.Range(0, 200).Select(index => Task.Run(async () =>
         {
             await start.Task;
-            if (index == 100)
+            switch (index % 4)
             {
-                watchdog.Dispose();
-                return;
+                case 0:
+                    await harness.Events.RaiseConnected();
+                    break;
+                case 1:
+                    await harness.Events.RaiseDisconnected();
+                    break;
+                case 2:
+                    await harness.Events.RaiseLatencyUpdated();
+                    break;
+                default:
+                    await harness.Watchdog.ClientOnDisconnected();
+                    break;
             }
 
-            await watchdog.ClientOnConnected();
-            await watchdog.ClientOnDisconnected(client.Object);
+            if (index == 100)
+            {
+                await harness.Watchdog.StopAsync(CancellationToken.None);
+            }
         })).ToArray();
         start.SetResult();
         var exception = await Record.ExceptionAsync(() => Task.WhenAll(eventTasks));
+        harness.Watchdog.Dispose();
+        harness.Time.Advance(TimeSpan.FromMinutes(10));
 
         Assert.Null(exception);
-        Assert.Equal(0, startCalls);
-        Assert.Equal(0, failFastCalls);
-    }
-
-    [Fact]
-    public async Task Dispose_while_polling_stops_the_check_without_restarting_or_failing_fast()
-    {
-        var delayCalls = 0;
-        var startCalls = 0;
-        var failFastCalls = 0;
-        var pollingStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var client = CreateClient(ConnectionState.Connecting, () =>
-        {
-            startCalls++;
-            return Task.CompletedTask;
-        });
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(5),
-            delayAsync: (_, token) =>
-            {
-                if (++delayCalls == 1)
-                {
-                    return Task.CompletedTask;
-                }
-
-                pollingStarted.TrySetResult();
-                return Task.Delay(Timeout.InfiniteTimeSpan, token);
-            },
-            failFast: () => failFastCalls++,
-            logger: NullLogger.Instance);
-
-        var disconnectedTask = watchdog.ClientOnDisconnected(client.Object);
-        await pollingStarted.Task;
-        watchdog.Dispose();
-        await disconnectedTask;
-
-        Assert.Equal(0, startCalls);
-        Assert.Equal(0, failFastCalls);
-    }
-
-    [Fact]
-    public async Task ClientOnConnected_after_Dispose_does_not_throw()
-    {
-        var watchdog = CreateWatchdog();
-        watchdog.Dispose();
-
-        var exception = await Record.ExceptionAsync(watchdog.ClientOnConnected);
-
-        Assert.Null(exception);
-    }
-
-    [Fact]
-    public void Arm_after_Dispose_throws()
-    {
-        var watchdog = CreateWatchdog();
-        watchdog.Dispose();
-
-        Assert.Throws<ObjectDisposedException>(watchdog.Arm);
-    }
-
-    [Fact]
-    public async Task CheckStateAsync_returns_when_client_is_connected()
-    {
-        var startCalls = 0;
-        var client = CreateClient(ConnectionState.Connected, () =>
-        {
-            startCalls++;
-            return Task.CompletedTask;
-        });
-        var watchdog = CreateWatchdog();
-
-        await watchdog.CheckStateAsync(client.Object);
-
-        Assert.Equal(0, startCalls);
-    }
-
-    [Fact]
-    public async Task CheckStateAsync_fails_fast_when_client_stays_connecting()
-    {
-        var startCalls = 0;
-        var failFastCalls = 0;
-        var client = CreateClient(ConnectionState.Connecting, () =>
-        {
-            startCalls++;
-            return Task.CompletedTask;
-        });
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(1),
-            delayAsync: (_, _) => Task.CompletedTask,
-            failFast: () => failFastCalls++,
-            logger: NullLogger.Instance);
-
-        await watchdog.CheckStateAsync(client.Object);
-
-        Assert.Equal(0, startCalls);
-        Assert.Equal(1, failFastCalls);
-    }
-
-    [Fact]
-    public async Task CheckStateAsync_fails_fast_when_client_stays_disconnecting()
-    {
-        var startCalls = 0;
-        var failFastCalls = 0;
-        var client = CreateClient(ConnectionState.Disconnecting, () =>
-        {
-            startCalls++;
-            return Task.CompletedTask;
-        });
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(1),
-            delayAsync: (_, _) => Task.CompletedTask,
-            failFast: () => failFastCalls++,
-            logger: NullLogger.Instance);
-
-        await watchdog.CheckStateAsync(client.Object);
-
-        Assert.Equal(0, startCalls);
-        Assert.Equal(1, failFastCalls);
-    }
-
-    [Fact]
-    public async Task CheckStateAsync_logs_critical_before_failing_fast()
-    {
-        var logger = new ListLogger();
-        var levelsLoggedBeforeFailFast = new List<LogLevel>();
-        var client = CreateClient(ConnectionState.Connecting, () => Task.CompletedTask);
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(1),
-            delayAsync: (_, _) => Task.CompletedTask,
-            failFast: () => levelsLoggedBeforeFailFast.AddRange(logger.Entries.Select(entry => entry.Level)),
-            logger: logger);
-
-        await watchdog.CheckStateAsync(client.Object);
-
-        Assert.Equal([LogLevel.Warning, LogLevel.Critical], levelsLoggedBeforeFailFast);
-        Assert.Equal("Client stuck reconnecting. Killing process.", logger.Entries[^1].Message);
-    }
-
-    [Fact]
-    public async Task CheckStateAsync_recovers_without_restart_when_connecting_settles_to_connected()
-    {
-        var startCalls = 0;
-        var state = ConnectionState.Connecting;
-        var client = CreateClient(() => state, () =>
-        {
-            startCalls++;
-            return Task.CompletedTask;
-        });
-        var failFastCalls = 0;
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(5),
-            delayAsync: (_, _) =>
-            {
-                state = ConnectionState.Connected;
-                return Task.CompletedTask;
-            },
-            failFast: () => failFastCalls++,
-            logger: NullLogger.Instance);
-
-        await watchdog.CheckStateAsync(client.Object);
-
-        Assert.Equal(0, startCalls);
-        Assert.Equal(0, failFastCalls);
-    }
-
-    [Fact]
-    public async Task CheckStateAsync_restarts_when_connecting_settles_to_disconnected()
-    {
-        var startCalls = 0;
-        var state = ConnectionState.Connecting;
-        var client = CreateClient(() => state, () =>
-        {
-            startCalls++;
-            state = ConnectionState.Connected;
-            return Task.CompletedTask;
-        });
-        var failFastCalls = 0;
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(5),
-            delayAsync: (_, _) =>
-            {
-                if (state == ConnectionState.Connecting)
-                {
-                    state = ConnectionState.Disconnected;
-                }
-
-                return Task.CompletedTask;
-            },
-            failFast: () => failFastCalls++,
-            logger: NullLogger.Instance);
-
-        await watchdog.CheckStateAsync(client.Object);
-
-        Assert.Equal(1, startCalls);
-        Assert.Equal(0, failFastCalls);
-    }
-
-    [Fact]
-    public async Task CheckStateAsync_starts_client_and_succeeds_when_it_reconnects()
-    {
-        var startCalls = 0;
-        var state = ConnectionState.Disconnected;
-        var client = CreateClient(() => state, () =>
-        {
-            startCalls++;
-            state = ConnectionState.Connecting;
-            return Task.CompletedTask;
-        });
-        // Discord.Net reaches Connected on the poll after the restart is dispatched.
-        var failFastCalls = 0;
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(5),
-            delayAsync: (_, _) =>
-            {
-                if (state == ConnectionState.Connecting)
-                {
-                    state = ConnectionState.Connected;
-                }
-
-                return Task.CompletedTask;
-            },
-            failFast: () => failFastCalls++,
-            logger: NullLogger.Instance);
-
-        await watchdog.CheckStateAsync(client.Object);
-
-        Assert.Equal(1, startCalls);
-        Assert.Equal(0, failFastCalls);
-    }
-
-    [Fact]
-    public async Task CheckStateAsync_fails_fast_when_client_never_reconnects()
-    {
-        var failFastCalls = 0;
-        var client = CreateClient(ConnectionState.Disconnected, () => Task.CompletedTask);
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(1),
-            delayAsync: (_, _) => Task.CompletedTask,
-            failFast: () => failFastCalls++,
-            logger: NullLogger.Instance);
-
-        await watchdog.CheckStateAsync(client.Object);
-
-        Assert.Equal(1, failFastCalls);
-    }
-
-    [Fact]
-    public async Task CheckStateAsync_fails_fast_when_restart_faults()
-    {
-        var failFastCalls = 0;
-        var client = CreateClient(
-            ConnectionState.Disconnected,
-            () => Task.FromException(new InvalidOperationException("boom")));
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(1),
-            delayAsync: (_, _) => Task.Delay(Timeout.InfiniteTimeSpan, CancellationToken.None),
-            failFast: () => failFastCalls++,
-            logger: NullLogger.Instance);
-
-        await watchdog.CheckStateAsync(client.Object);
-
-        Assert.Equal(1, failFastCalls);
-    }
-
-    [Fact]
-    public async Task CheckStateAsync_fails_fast_when_start_async_throws_synchronously()
-    {
-        var failFastCalls = 0;
-        var client = CreateClient(
-            ConnectionState.Disconnected,
-            () => throw new InvalidOperationException("boom"));
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.FromSeconds(1),
-            delayAsync: (_, _) => Task.Delay(Timeout.InfiniteTimeSpan, CancellationToken.None),
-            failFast: () => failFastCalls++,
-            logger: NullLogger.Instance);
-
-        await watchdog.CheckStateAsync(client.Object);
-
-        Assert.Equal(1, failFastCalls);
-    }
-
-    [Fact]
-    public async Task CheckStateAsync_terminates_immediately_when_restart_faults_while_waiting_for_connected()
-    {
-        var delayCalls = 0;
-        var terminateMessages = new List<string>();
-        var logger = new ListLogger();
-        var connectFaults = new TaskCompletionSource();
-
-        await ReconnectStateChecker.CheckStateAsync(
-            () => ConnectionState.Disconnected,
-            () => connectFaults.Task,
-            (_, _) =>
-            {
-                delayCalls++;
-                connectFaults.TrySetException(new InvalidOperationException("boom"));
-                return Task.CompletedTask;
-            },
-            TimeSpan.FromSeconds(5),
-            logger,
-            terminateMessages.Add,
-            CancellationToken.None);
-
-        Assert.Equal(1, delayCalls);
-        Assert.Equal(["Client reset faulted."], terminateMessages);
-        Assert.Contains(
-            logger.Entries,
-            entry => entry.Level == LogLevel.Error
-                && entry.Message == "Client reset faulted."
-                && entry.Exception?.GetBaseException().Message == "boom");
-    }
-
-    [Fact]
-    public async Task CheckStateAsync_terminates_immediately_when_restart_is_cancelled_while_waiting_for_connected()
-    {
-        var delayCalls = 0;
-        var terminateMessages = new List<string>();
-        var logger = new ListLogger();
-        var connectCancelled = new TaskCompletionSource();
-
-        await ReconnectStateChecker.CheckStateAsync(
-            () => ConnectionState.Disconnected,
-            () => connectCancelled.Task,
-            (_, _) =>
-            {
-                delayCalls++;
-                connectCancelled.TrySetCanceled(CancellationToken.None);
-                return Task.CompletedTask;
-            },
-            TimeSpan.FromSeconds(5),
-            logger,
-            terminateMessages.Add,
-            CancellationToken.None);
-
-        Assert.Equal(1, delayCalls);
-        Assert.Equal(["Client reset faulted."], terminateMessages);
-        Assert.Contains(
-            logger.Entries,
-            entry => entry.Level == LogLevel.Error && entry.Message == "Client reset was cancelled.");
-    }
-
-    [Fact]
-    public async Task ClientOnConnected_cancels_and_disposes_the_previous_token_source()
-    {
-        var watchdog = CreateWatchdog();
-        var previousToken = watchdog.GetReconnectCancellationToken();
-
-        await watchdog.ClientOnConnected();
-
-        Assert.True(previousToken.IsCancellationRequested);
-        Assert.Throws<ObjectDisposedException>(() => previousToken.WaitHandle);
-    }
-
-    [Fact]
-    public async Task CheckStateAsync_succeeds_when_restart_faults_but_client_is_already_connected()
-    {
-        var state = ConnectionState.Disconnected;
-        var terminateMessages = new List<string>();
-        var logger = new ListLogger();
-
-        await ReconnectStateChecker.CheckStateAsync(
-            () => state,
-            () =>
-            {
-                state = ConnectionState.Connected;
-                return Task.FromException(new InvalidOperationException("boom"));
-            },
-            (_, _) => Task.CompletedTask,
-            TimeSpan.FromSeconds(5),
-            logger,
-            terminateMessages.Add,
-            CancellationToken.None);
-
-        Assert.Empty(terminateMessages);
-        Assert.Contains(
-            logger.Entries,
-            entry => entry.Level == LogLevel.Information && entry.Message == "Client reset successfully.");
-    }
-
-    [Fact]
-    public async Task CheckStateAsync_still_fails_fast_via_timeout_when_restart_faults_after_the_timeout()
-    {
-        // The timeout elapses before the restart task faults, so the backstop fires
-        // through the timeout path and the late fault must not matter.
-        var failFastCalls = 0;
-        var connectFaults = new TaskCompletionSource();
-        var client = CreateClient(ConnectionState.Disconnected, () => connectFaults.Task);
-        var watchdog = new ReconnectWatchdog(
-            resetTimeout: TimeSpan.Zero,
-            delayAsync: (_, _) => Task.CompletedTask,
-            failFast: () => failFastCalls++,
-            logger: NullLogger.Instance);
-
-        await watchdog.CheckStateAsync(client.Object);
-
-        Assert.Equal(1, failFastCalls);
-
-        connectFaults.SetException(new InvalidOperationException("boom, but too late to matter"));
-    }
-
-    private static ReconnectWatchdog CreateWatchdog() =>
-        new(
-            resetTimeout: TimeSpan.FromSeconds(1),
-            delayAsync: (_, _) => Task.CompletedTask,
-            failFast: () => { },
-            logger: NullLogger.Instance);
-
-    private static Mock<IDiscordClient> CreateClient(
-        ConnectionState connectionState,
-        Func<Task> startAsync) =>
-        CreateClient(() => connectionState, startAsync);
-
-    private static Mock<IDiscordClient> CreateClient(
-        Func<ConnectionState> getConnectionState,
-        Func<Task> startAsync)
-    {
-        var client = new Mock<IDiscordClient>();
-        client.Setup(c => c.ConnectionState).Returns(getConnectionState);
-        client.Setup(c => c.StartAsync()).Returns(startAsync);
-        return client;
+        harness.AssertNoRestartOrTermination();
+        Assert.DoesNotContain(harness.Logger.Entries, entry => entry.Level >= LogLevel.Error);
     }
 }

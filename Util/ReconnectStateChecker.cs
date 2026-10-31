@@ -17,7 +17,7 @@ internal static class ReconnectStateChecker
     internal static async Task CheckStateAsync(
         Func<ConnectionState> getConnectionState,
         Func<Task> startAsync,
-        Func<TimeSpan, CancellationToken, Task> delayAsync,
+        TimeProvider timeProvider,
         TimeSpan timeout,
         ILogger logger,
         Action<string> terminate,
@@ -25,7 +25,7 @@ internal static class ReconnectStateChecker
     {
         try
         {
-            await CheckStateCoreAsync(getConnectionState, startAsync, delayAsync, timeout, logger, terminate, cancellationToken)
+            await CheckStateCoreAsync(getConnectionState, startAsync, timeProvider, timeout, logger, terminate, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -36,7 +36,7 @@ internal static class ReconnectStateChecker
     private static async Task CheckStateCoreAsync(
         Func<ConnectionState> getConnectionState,
         Func<Task> startAsync,
-        Func<TimeSpan, CancellationToken, Task> delayAsync,
+        TimeProvider timeProvider,
         TimeSpan timeout,
         ILogger logger,
         Action<string> terminate,
@@ -50,7 +50,7 @@ internal static class ReconnectStateChecker
         if (!ReconnectGuard.IsSafeToRestart(getConnectionState()))
         {
             logger.ClientAlreadyReconnecting();
-            if (!await WaitForSettledStateAsync(getConnectionState, delayAsync, timeout, cancellationToken).ConfigureAwait(false))
+            if (!await WaitForSettledStateAsync(getConnectionState, timeProvider, timeout, cancellationToken).ConfigureAwait(false))
             {
                 TerminateUnlessCancelled("Client stuck reconnecting.");
                 return;
@@ -80,15 +80,15 @@ internal static class ReconnectStateChecker
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            logger.ClientResetFaulted(ex);
+            logger.ClientResetFaulted(exception);
             TerminateUnlessCancelled("Client reset faulted.");
             return;
         }
 
         // StartAsync completes once the reconnect is scheduled, so it can still fault while we poll.
-        if (!await WaitForConnectedOrFaultAsync(getConnectionState, connect, delayAsync, timeout, cancellationToken).ConfigureAwait(false))
+        if (!await WaitForConnectedOrFaultAsync(getConnectionState, connect, timeProvider, timeout, cancellationToken).ConfigureAwait(false))
         {
             TerminateUnlessCancelled("Client reset timed out.");
             return;
@@ -121,13 +121,13 @@ internal static class ReconnectStateChecker
     private static Task<bool> WaitForConnectedOrFaultAsync(
         Func<ConnectionState> getConnectionState,
         Task connect,
-        Func<TimeSpan, CancellationToken, Task> delayAsync,
+        TimeProvider timeProvider,
         TimeSpan timeout,
         CancellationToken cancellationToken) =>
         WaitForStateAsync(
             getConnectionState,
             state => state == ConnectionState.Connected || HasFailed(connect),
-            delayAsync,
+            timeProvider,
             timeout,
             cancellationToken);
 
@@ -140,33 +140,32 @@ internal static class ReconnectStateChecker
     /// </summary>
     private static Task<bool> WaitForSettledStateAsync(
         Func<ConnectionState> getConnectionState,
-        Func<TimeSpan, CancellationToken, Task> delayAsync,
+        TimeProvider timeProvider,
         TimeSpan timeout,
         CancellationToken cancellationToken) =>
         WaitForStateAsync(
             getConnectionState,
             static state => ReconnectGuard.IsSafeToRestart(state) || state == ConnectionState.Connected,
-            delayAsync,
+            timeProvider,
             timeout,
             cancellationToken);
 
     private static async Task<bool> WaitForStateAsync(
         Func<ConnectionState> getConnectionState,
         Func<ConnectionState, bool> isTargetState,
-        Func<TimeSpan, CancellationToken, Task> delayAsync,
+        TimeProvider timeProvider,
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
-        var elapsed = TimeSpan.Zero;
+        var startTimestamp = timeProvider.GetTimestamp();
         while (!isTargetState(getConnectionState()))
         {
-            if (elapsed >= timeout)
+            if (timeProvider.GetElapsedTime(startTimestamp) >= timeout)
             {
                 return false;
             }
 
-            await delayAsync(PollInterval, cancellationToken).ConfigureAwait(false);
-            elapsed += PollInterval;
+            await Task.Delay(PollInterval, timeProvider, cancellationToken).ConfigureAwait(false);
         }
 
         return true;

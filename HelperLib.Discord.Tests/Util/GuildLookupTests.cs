@@ -1,130 +1,98 @@
 using Discord;
+using Discord.WebSocket;
 using HelperLib.Discord.Models;
 using HelperLib.Discord.Util;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace HelperLib.Discord.Tests.Util;
 
-[Collection(ConsoleAndStaticStateCollection.Name)]
 public class GuildLookupTests : IDisposable
 {
-    // Tests swap GuildLookup's static logger for a ListLogger; restore it so tests stay order-independent.
+    private static readonly Dictionary<string, Func<GuildLookup, ulong?, bool>> Lookups = new()
+    {
+        [nameof(GuildLookup.GetGuild)] = (lookup, guildId) => lookup.GetGuild(guildId, out _),
+        [nameof(GuildLookup.GetTextChannel)] = (lookup, guildId) => lookup.GetTextChannel(guildId, 456, out _),
+        [nameof(GuildLookup.GetVoiceChannel)] = (lookup, guildId) => lookup.GetVoiceChannel(guildId, 456, out _),
+        [nameof(GuildLookup.GetCategory)] = (lookup, guildId) => lookup.GetCategory(guildId, 456, out _),
+        [nameof(GuildLookup.GetRole)] = (lookup, guildId) => lookup.GetRole(guildId, 456, out _),
+        [nameof(GuildLookup.GetEmote)] = (lookup, guildId) => lookup.GetEmote(guildId, "wave", out _),
+        [nameof(GuildLookup.GetGuildUserById)] = (lookup, guildId) => lookup.GetGuildUserById(guildId, 456, out _),
+        [nameof(GuildLookup.GetGuildOwner)] = (lookup, guildId) => lookup.GetGuildOwner(guildId, out _),
+        [nameof(GuildLookup.GetGuildAdmins)] = (lookup, guildId) => lookup.GetGuildAdmins(guildId, out _),
+    };
+
+    // The same delegates the lookups pass to TrySelect, with the message each one must log for guild 123.
+    private static readonly Dictionary<string, (Action<ILogger> LogMissingTarget, string Message)> MissingTargetLogs = new()
+    {
+        ["text channel"] = (logger => logger.NoSuchChannel("text channel", 456, 123), "No such text channel 456 on guild 123"),
+        ["voice channel"] = (logger => logger.NoSuchChannel("voice channel", 456, 123), "No such voice channel 456 on guild 123"),
+        ["category"] = (logger => logger.NoSuchCategory(456), "No such category 456"),
+        ["role"] = (logger => logger.NoSuchRole(456, 123), "No such role 456 on guild 123"),
+        ["emote"] = (logger => logger.NoSuchEmote("wave", 123), "No such emote wave on guild 123"),
+        ["guild user"] = (logger => logger.GuildUserNotFound(456), "Failed to get SocketGuildUser 456"),
+        ["owner"] = (logger => logger.GuildOwnerNotFound(), "Failed to get SocketGuildOwner"),
+    };
+
+    private readonly DiscordSocketClient _client = new(new DiscordSocketConfig());
+    private readonly ListLogger<GuildLookup> _logger = new();
+
+    public static TheoryData<string> LookupNames => NamesOf(Lookups.Keys);
+
+    public static TheoryData<string> MissingTargetKinds => NamesOf(MissingTargetLogs.Keys);
+
     public void Dispose()
     {
-        GuildLookup.SetLogger(ConsoleLogger.Instance);
-        GuildLookup.SetDefaultGuildId(null);
+        _client.Dispose();
         GC.SuppressFinalize(this);
     }
 
-    [Fact]
-    public void GetGuild_returns_false_when_client_is_not_initialized()
+    [Theory]
+    [MemberData(nameof(LookupNames))]
+    public void Lookup_returns_false_and_logs_only_the_unknown_guild_when_the_guild_is_unknown(string lookupName)
     {
-        var found = GuildLookup.GetGuild(123, out var guild);
+        var found = Lookups[lookupName](CreateLookup(), 123);
 
         Assert.False(found);
-        Assert.Null(guild);
+        var entry = Assert.Single(_logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal("No such guild 123", entry.Message);
     }
 
-    [Fact]
-    public void GetGuild_returns_false_and_reports_missing_id_when_no_guild_id_and_no_default()
+    [Theory]
+    [MemberData(nameof(LookupNames))]
+    public void Lookup_returns_false_and_reports_missing_id_when_no_guild_id_and_no_default(string lookupName)
     {
-        var logger = UseListLogger();
-        GuildLookup.SetDefaultGuildId(null);
-
-        var found = GuildLookup.GetGuild(null, out _);
+        var found = Lookups[lookupName](CreateLookup(), null);
 
         Assert.False(found);
-        var entry = Assert.Single(logger.Entries);
+        var entry = Assert.Single(_logger.Entries);
         Assert.Equal(LogLevel.Warning, entry.Level);
         Assert.Equal("No guild id given and no default guild id set!", entry.Message);
     }
 
     [Fact]
-    public void GetRole_returns_false_and_reports_missing_id_when_no_guild_id_and_no_default()
+    public void GetGuild_uses_the_default_guild_id_when_no_guild_id_is_given()
     {
-        var logger = UseListLogger();
-        GuildLookup.SetDefaultGuildId(null);
+        var lookup = CreateLookup(defaultGuildId: 789);
 
-        var found = GuildLookup.GetRole(null, 456, out _);
+        var found = lookup.GetGuild(null, out _);
 
         Assert.False(found);
-        var entry = Assert.Single(logger.Entries);
-        Assert.Equal(LogLevel.Warning, entry.Level);
-        Assert.Equal("No guild id given and no default guild id set!", entry.Message);
+        Assert.Equal("No such guild 789", Assert.Single(_logger.Entries).Message);
     }
 
     [Fact]
-    public void GetTextChannel_returns_false_when_guild_is_missing()
+    public async Task GetGuildUserAsync_returns_null_and_reports_missing_id_when_no_guild_id_and_no_default()
     {
-        var found = GuildLookup.GetTextChannel(123, 456, out var channel);
+        var lookup = CreateLookup();
 
-        Assert.False(found);
-        Assert.Null(channel);
-    }
-
-    [Fact]
-    public void GetVoiceChannel_returns_false_when_guild_is_missing()
-    {
-        var found = GuildLookup.GetVoiceChannel(123, 456, out var channel);
-
-        Assert.False(found);
-        Assert.Null(channel);
-    }
-
-    [Fact]
-    public void GetCategory_returns_false_when_guild_is_missing()
-    {
-        var found = GuildLookup.GetCategory(123, 456, out var category);
-
-        Assert.False(found);
-        Assert.Null(category);
-    }
-
-    [Fact]
-    public void GetRole_returns_false_when_guild_is_missing()
-    {
-        var found = GuildLookup.GetRole(123, 456, out var role);
-
-        Assert.False(found);
-        Assert.Null(role);
-    }
-
-    [Fact]
-    public void GetEmote_returns_false_when_guild_is_missing()
-    {
-        var found = GuildLookup.GetEmote(123, "wave", out var emote);
-
-        Assert.False(found);
-        Assert.Null(emote);
-    }
-
-    [Fact]
-    public void GetGuildUserById_returns_false_when_guild_is_missing()
-    {
-        var found = GuildLookup.GetGuildUserById(123, 456, out var user);
-
-        Assert.False(found);
-        Assert.Null(user);
-    }
-
-    [Fact]
-    public async Task GetGuildUserAsync_returns_null_when_client_is_not_initialized()
-    {
-        var user = await GuildLookup.GetGuildUserAsync(123, 456);
+        var user = await lookup.GetGuildUserAsync(null, 456, forceRefresh: true);
 
         Assert.Null(user);
-    }
-
-    [Fact]
-    public async Task GetGuildUserAsync_returns_null_when_no_guild_id_and_no_default()
-    {
-        GuildLookup.SetDefaultGuildId(null);
-
-        var user = await GuildLookup.GetGuildUserAsync(null, 456, forceRefresh: true);
-
-        Assert.Null(user);
+        Assert.Equal("No guild id given and no default guild id set!", Assert.Single(_logger.Entries).Message);
     }
 
     [Fact]
@@ -184,258 +152,117 @@ public class GuildLookupTests : IDisposable
     }
 
     [Fact]
-    public void GetGuildOwner_returns_false_when_guild_is_missing()
-    {
-        var found = GuildLookup.GetGuildOwner(123, out var owner);
-
-        Assert.False(found);
-        Assert.Null(owner);
-    }
-
-    [Fact]
-    public void GetGuildAdmins_returns_false_when_guild_is_missing()
-    {
-        var found = GuildLookup.GetGuildAdmins(123, out var users);
-
-        Assert.False(found);
-        Assert.Null(users);
-    }
-
-    [Fact]
     public async Task GetGuildUsersByIdAsync_returns_unsuccessful_result_when_guild_is_missing()
     {
-        GuildUsersResult result = await GuildLookup.GetGuildUsersByIdAsync(123);
+        GuildUsersResult result = await CreateLookup().GetGuildUsersByIdAsync(123);
 
         Assert.False(result.Success);
         Assert.Empty(result.Users);
     }
 
     [Fact]
-    public void TryGetChannel_returns_false_when_guild_is_missing()
-    {
-        var found = GuildLookup.TryGetChannel(NullLogger.Instance, false, new object(), "text channel", 1, 2, out object? channel);
-
-        Assert.False(found);
-        Assert.Null(channel);
-    }
-
-    [Fact]
-    public void TryGetChannel_returns_false_when_channel_is_missing()
-    {
-        var found = GuildLookup.TryGetChannel<object>(NullLogger.Instance, true, null, "text channel", 1, 2, out var channel);
-
-        Assert.False(found);
-        Assert.Null(channel);
-    }
-
-    [Fact]
-    public void TryGetChannel_returns_true_when_channel_exists()
+    public void TrySelect_returns_the_found_target_without_logging()
     {
         var expected = new object();
 
-        var found = GuildLookup.TryGetChannel(NullLogger.Instance, true, expected, "text channel", 1, 2, out var channel);
+        var selected = GuildLookup.TrySelect(_logger, true, () => expected, _ => Assert.Fail("Nothing is missing."), out var target);
 
-        Assert.True(found);
-        Assert.Same(expected, channel);
+        Assert.True(selected);
+        Assert.Same(expected, target);
+        Assert.Empty(_logger.Entries);
     }
 
-    [Fact]
-    public void TryGetCategory_returns_false_when_categories_are_missing()
+    [Theory]
+    [MemberData(nameof(MissingTargetKinds))]
+    public void TrySelect_returns_false_and_logs_the_lookup_message_when_the_target_is_missing(string kind)
     {
-        var found = GuildLookup.TryGetCategory<object>(
-            NullLogger.Instance,
-            true,
-            null,
-            _ => 0,
-            1,
-            out var category);
+        var (logMissingTarget, message) = MissingTargetLogs[kind];
 
-        Assert.False(found);
-        Assert.Null(category);
-    }
+        var selected = GuildLookup.TrySelect<object>(_logger, true, () => null, logMissingTarget, out var target);
 
-    [Fact]
-    public void TryGetCategory_returns_false_when_category_id_is_not_found()
-    {
-        var found = GuildLookup.TryGetCategory(
-            NullLogger.Instance,
-            true,
-            [new LookupItem(10)],
-            item => item.Id,
-            20,
-            out var category);
-
-        Assert.False(found);
-        Assert.Null(category);
-    }
-
-    [Fact]
-    public void TryGetCategory_returns_true_when_category_id_matches()
-    {
-        var expected = new LookupItem(20);
-
-        var found = GuildLookup.TryGetCategory(
-            NullLogger.Instance,
-            true,
-            [new LookupItem(10), expected],
-            item => item.Id,
-            20,
-            out var category);
-
-        Assert.True(found);
-        Assert.Same(expected, category);
-    }
-
-    [Fact]
-    public void TryGetRole_returns_false_when_role_is_missing()
-    {
-        var logger = new ListLogger();
-
-        var found = GuildLookup.TryGetRole<IRole>(logger, true, null, 1, 2, out var role);
-
-        Assert.False(found);
-        Assert.Null(role);
-        var entry = Assert.Single(logger.Entries);
+        Assert.False(selected);
+        Assert.Null(target);
+        var entry = Assert.Single(_logger.Entries);
         Assert.Equal(LogLevel.Warning, entry.Level);
-        Assert.Equal("No such role 2 on guild 1", entry.Message);
+        Assert.Equal(message, entry.Message);
     }
 
     [Fact]
-    public void TryGetRole_returns_true_when_role_exists()
+    public void TrySelect_returns_false_without_searching_or_logging_when_the_guild_is_missing()
     {
-        var expected = new Mock<IRole>().Object;
+        var selected = GuildLookup.TrySelect<object>(
+            _logger,
+            false,
+            () => throw new InvalidOperationException("The search must not run."),
+            _ => Assert.Fail("The missing guild is logged by the guild lookup."),
+            out var target);
 
-        var found = GuildLookup.TryGetRole(NullLogger.Instance, true, expected, 1, 2, out var role);
-
-        Assert.True(found);
-        Assert.Same(expected, role);
+        Assert.False(selected);
+        Assert.Null(target);
+        Assert.Empty(_logger.Entries);
     }
 
     [Fact]
-    public void TryGetEmote_matches_name_ignoring_case()
-    {
-        var expected = new LookupItem(1, "Wave");
-
-        var found = GuildLookup.TryGetEmote(
-            NullLogger.Instance,
-            true,
-            [expected],
-            item => item.Name,
-            123,
-            "wave",
-            out var emote);
-
-        Assert.True(found);
-        Assert.Same(expected, emote);
-    }
-
-    [Fact]
-    public void TryGetGuildOwner_returns_false_when_owner_is_missing()
-    {
-        var found = GuildLookup.TryGetGuildOwner<IGuildUser>(NullLogger.Instance, true, null, out var owner);
-
-        Assert.False(found);
-        Assert.Null(owner);
-    }
-
-    [Fact]
-    public void TryGetGuildOwner_returns_true_when_owner_exists()
-    {
-        var expected = new Mock<IGuildUser>().Object;
-
-        var found = GuildLookup.TryGetGuildOwner(NullLogger.Instance, true, expected, out var owner);
-
-        Assert.True(found);
-        Assert.Same(expected, owner);
-    }
-
-    [Fact]
-    public void GetGuildAdmins_filters_out_bots_and_non_administrators()
+    public void SelectAdmins_keeps_only_administrators_that_are_not_bots()
     {
         var admin = CreateGuildUser(isBot: false, administrator: true);
-        var botAdmin = CreateGuildUser(isBot: true, administrator: true);
-        var regularUser = CreateGuildUser(isBot: false, administrator: false);
+        var guildUsers = new[]
+        {
+            CreateGuildUser(isBot: false, administrator: false),
+            CreateGuildUser(isBot: true, administrator: true),
+            admin,
+            CreateGuildUser(isBot: true, administrator: false),
+        };
 
-        var found = GuildLookup.TryGetGuildAdmins(
-            NullLogger.Instance,
-            true,
-            [admin, botAdmin, regularUser],
-            out var admins);
+        var admins = GuildLookup.SelectAdmins(guildUsers);
 
-        Assert.True(found);
-        Assert.Equal([admin], admins);
+        Assert.Same(admin, Assert.Single(admins));
     }
 
     [Fact]
-    public async Task Concurrent_setters_and_readers_never_observe_a_torn_state_or_lose_an_update()
+    public void SelectAdmins_returns_nothing_when_there_are_no_users()
     {
-        // Enough iterations that the writers and readers overlap instead of finishing one after another.
-        const int iterations = 20_000;
-        var firstLogger = new ListLogger();
-        var secondLogger = new ListLogger();
-        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var tornReads = 0;
-
-        var guildIdWriter = Task.Run(async () =>
-        {
-            await start.Task;
-            for (var i = 0; i < iterations; i++)
-            {
-                GuildLookup.SetDefaultGuildId(i % 2 == 0 ? null : ulong.MaxValue);
-            }
-
-            GuildLookup.SetDefaultGuildId(42UL);
-        });
-        var loggerWriter = Task.Run(async () =>
-        {
-            await start.Task;
-            for (var i = 0; i < iterations; i++)
-            {
-                GuildLookup.SetLogger(i % 2 == 0 ? firstLogger : secondLogger);
-            }
-
-            GuildLookup.SetLogger(firstLogger);
-        });
-        var readers = Enumerable.Range(0, 2).Select(_ => Task.Run(async () =>
-        {
-            await start.Task;
-            for (var i = 0; i < iterations; i++)
-            {
-                var state = GuildLookup.Current;
-                var guildIdIsKnown = state.DefaultGuildId is null or ulong.MaxValue or 42UL;
-                var loggerIsKnown = ReferenceEquals(state.Logger, firstLogger)
-                    || ReferenceEquals(state.Logger, secondLogger)
-                    || ReferenceEquals(state.Logger, ConsoleLogger.Instance);
-                if (!guildIdIsKnown || !loggerIsKnown)
-                {
-                    Interlocked.Increment(ref tornReads);
-                }
-            }
-        })).ToArray();
-
-        start.SetResult();
-        await Task.WhenAll(readers.Append(guildIdWriter).Append(loggerWriter));
-
-        Assert.Equal(0, tornReads);
-        Assert.Equal(42UL, GuildLookup.Current.DefaultGuildId);
-        Assert.Same(firstLogger, GuildLookup.Current.Logger);
+        Assert.Empty(GuildLookup.SelectAdmins([]));
     }
 
-    private static ListLogger UseListLogger()
+    [Theory]
+    [InlineData("wave")]
+    [InlineData("WAVE")]
+    public void FindEmoteByName_finds_the_emote_ignoring_case(string requestedName)
     {
-        var logger = new ListLogger();
-        GuildLookup.SetLogger(logger);
-        return logger;
+        var wave = CreateEmote("wave");
+        var emotes = new[] { CreateEmote("smile"), wave };
+
+        var found = GuildLookup.FindEmoteByName(emotes, requestedName);
+
+        Assert.Same(wave, found);
     }
+
+    [Fact]
+    public void FindEmoteByName_returns_null_when_no_emote_has_the_name()
+    {
+        var found = GuildLookup.FindEmoteByName(new[] { CreateEmote("smile") }, "wave");
+
+        Assert.Null(found);
+    }
+
+    private static TheoryData<string> NamesOf(IEnumerable<string> names) => [.. names];
 
     private static IGuildUser CreateGuildUser(bool isBot, bool administrator)
     {
-        var user = new Mock<IGuildUser>();
-        user.Setup(u => u.IsBot).Returns(isBot);
-        user.Setup(u => u.GuildPermissions).Returns(
-            administrator ? GuildPermissions.All : GuildPermissions.None);
-        return user.Object;
+        var guildUser = new Mock<IGuildUser>();
+        guildUser.SetupGet(user => user.IsBot).Returns(isBot);
+        guildUser.SetupGet(user => user.GuildPermissions).Returns(new GuildPermissions(administrator: administrator));
+        return guildUser.Object;
     }
 
-    private sealed record LookupItem(ulong Id, string Name = "");
+    private static IEmote CreateEmote(string name)
+    {
+        var emote = new Mock<IEmote>();
+        emote.SetupGet(mock => mock.Name).Returns(name);
+        return emote.Object;
+    }
+
+    private GuildLookup CreateLookup(ulong? defaultGuildId = null) =>
+        new(_client, Options.Create(new HelperLibDiscordOptions { DefaultGuildId = defaultGuildId }), _logger);
 }

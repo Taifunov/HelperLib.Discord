@@ -16,17 +16,7 @@ public class ExtensionsTests
         var message = await channel.Object.SendEmbedAsync(embed);
 
         Assert.NotNull(message);
-        channel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            embed,
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        channel.VerifyEmbedSentOnce(sent => Equals(sent, embed));
     }
 
     [Fact]
@@ -37,17 +27,7 @@ public class ExtensionsTests
 
         await channel.Object.SendEmbedAsync(builder);
 
-        channel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            It.Is<Embed>(e => e.Title == "status"),
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        channel.VerifyEmbedSentOnce(sent => sent.Title == "status");
     }
 
     [Fact]
@@ -58,17 +38,7 @@ public class ExtensionsTests
 
         await channel.Object.SendEmbedAsync(embed);
 
-        channel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            embed,
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        channel.VerifyEmbedSentOnce(sent => Equals(sent, embed));
     }
 
     [Fact]
@@ -79,17 +49,7 @@ public class ExtensionsTests
 
         await channel.Object.SendEmbedAsync(builder);
 
-        channel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            It.Is<Embed>(e => e.Description == "ready"),
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        channel.VerifyEmbedSentOnce(sent => sent.Description == "ready");
     }
 
     [Fact]
@@ -100,17 +60,7 @@ public class ExtensionsTests
 
         await channel.Object.SendEmbedAsync(embed);
 
-        channel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            embed,
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        channel.VerifyEmbedSentOnce(sent => Equals(sent, embed));
     }
 
     [Fact]
@@ -121,17 +71,7 @@ public class ExtensionsTests
 
         await channel.Object.SendEmbedAsync(builder);
 
-        channel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            It.Is<Embed>(e => e.Title == "dm"),
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        channel.VerifyEmbedSentOnce(sent => sent.Title == "dm");
     }
 
     [Fact]
@@ -145,17 +85,7 @@ public class ExtensionsTests
 
         await user.Object.SendEmbedAsync(embed);
 
-        dmChannel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            embed,
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        dmChannel.VerifyEmbedSentOnce(sent => Equals(sent, embed));
     }
 
     [Fact]
@@ -169,17 +99,7 @@ public class ExtensionsTests
 
         await user.Object.SendEmbedAsync(builder);
 
-        dmChannel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            It.Is<Embed>(e => e.Description == "user"),
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        dmChannel.VerifyEmbedSentOnce(sent => sent.Description == "user");
     }
 
     [Fact]
@@ -204,57 +124,24 @@ public class ExtensionsTests
     public async Task SendImageAsync_with_dm_channel_sends_downloaded_image_as_file()
     {
         var channel = DiscordMockBuilder.CreateDMChannel();
-        using var handler = new FakeImageHandler([1, 2, 3]);
+        using var handler = FakeHttpMessageHandler.Returning([1, 2, 3]);
         using var downloader = new ImageDownloader(handler);
         using var cancellation = new CancellationTokenSource();
         byte[]? sentBytes = null;
-        channel.Setup(c => c.SendFileAsync(
-                It.IsAny<Stream>(),
-                It.IsAny<string>(),
-                It.IsAny<string>(),
-                It.IsAny<bool>(),
-                It.IsAny<Embed>(),
-                It.IsAny<RequestOptions>(),
-                It.IsAny<bool>(),
-                It.IsAny<AllowedMentions>(),
-                It.IsAny<MessageReference>(),
-                It.IsAny<MessageComponent>(),
-                It.IsAny<ISticker[]>(),
-                It.IsAny<Embed[]>(),
-                It.IsAny<MessageFlags>()))
-            .Callback(new InvocationAction(invocation =>
-            {
-                using var copy = new MemoryStream();
-                ((Stream)invocation.Arguments[0]!).CopyTo(copy);
-                sentBytes = copy.ToArray();
-            }))
-            .ReturnsAsync(new Mock<IUserMessage>().Object);
+        channel.SetupSendFile(bytes => sentBytes = bytes);
 
         await Extensions.SendImageAsync(channel.Object, "https://cdn.discordapp.com/image.png", downloader,
             cancellation.Token);
 
         Assert.Equal(new byte[] { 1, 2, 3 }, sentBytes);
-        channel.Verify(c => c.SendFileAsync(
-            It.IsAny<Stream>(),
-            "image.png",
-            It.IsAny<string>(),
-            It.IsAny<bool>(),
-            It.IsAny<Embed>(),
-            It.Is<RequestOptions>(options => options.CancelToken == cancellation.Token),
-            It.IsAny<bool>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        channel.VerifyFileSentOnce("image.png", cancellation.Token);
     }
 
     [Fact]
     public async Task SendImageAsync_with_cancelled_token_stops_the_download_and_sends_nothing()
     {
         var channel = DiscordMockBuilder.CreateDMChannel();
-        using var handler = new FakeImageHandler([1, 2, 3]);
+        using var handler = FakeHttpMessageHandler.Returning([1, 2, 3]);
         using var downloader = new ImageDownloader(handler);
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
@@ -263,20 +150,7 @@ public class ExtensionsTests
             Extensions.SendImageAsync(channel.Object, "https://cdn.discordapp.com/image.png", downloader,
                 cancellation.Token));
 
-        channel.Verify(c => c.SendFileAsync(
-            It.IsAny<Stream>(),
-            It.IsAny<string>(),
-            It.IsAny<string>(),
-            It.IsAny<bool>(),
-            It.IsAny<Embed>(),
-            It.IsAny<RequestOptions>(),
-            It.IsAny<bool>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Never);
+        channel.VerifyNoFileSent();
     }
 
     [Theory]
@@ -326,18 +200,5 @@ public class ExtensionsTests
         {
             _ = user.SendEmbedAsync(new EmbedBuilder().WithTitle("user").Build());
         });
-    }
-
-    private sealed class FakeImageHandler(byte[] imageBytes) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent(imageBytes)
-            });
-        }
     }
 }

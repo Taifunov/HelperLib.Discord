@@ -5,17 +5,8 @@ namespace HelperLib.Discord.Util;
 /// <summary>Every log message of the library, source-generated so that the message templates stay constant.</summary>
 internal static partial class Log
 {
-    [LoggerMessage(Level = LogLevel.Information, Message = "Default GuildId was successfully set to {DefaultGuildId}")]
-    internal static partial void DefaultGuildIdSet(this ILogger logger, ulong? defaultGuildId);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Starting IonicHelper.")]
-    internal static partial void StartingIonicHelper(this ILogger logger);
-
     [LoggerMessage(Level = LogLevel.Error, Message = "Reconnect watchdog failed.")]
     internal static partial void ReconnectWatchdogFailed(this ILogger logger, Exception exception);
-
-    [LoggerMessage(Level = LogLevel.Error, Message = "Stopping and disposing the client failed.")]
-    internal static partial void ClientCleanupFailed(this ILogger logger, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Client disconnected again while a reconnect check is running, ignoring the duplicate.")]
     internal static partial void DuplicateDisconnectIgnored(this ILogger logger);
@@ -37,6 +28,15 @@ internal static partial class Log
 
     [LoggerMessage(Level = LogLevel.Critical, Message = "{Reason} Killing process.")]
     internal static partial void KillingProcess(this ILogger logger, string reason);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Asking the host to stop failed; the process still ends after the grace period.")]
+    internal static partial void GracefulStopFailed(this ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Waiting for the shutdown grace period failed; ending the process now.")]
+    internal static partial void GracePeriodWaitFailed(this ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "No heartbeat acknowledgement for {Timeout}; terminating.")]
+    internal static partial void NoHeartbeatAcknowledgement(this ILogger logger, TimeSpan timeout);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Client is already reconnecting, waiting for it to settle...")]
     internal static partial void ClientAlreadyReconnecting(this ILogger logger);
@@ -74,9 +74,6 @@ internal static partial class Log
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to get SocketGuildUser {UserId}")]
     internal static partial void GuildUserNotFound(this ILogger logger, ulong userId);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Discord client is not initialized")]
-    internal static partial void ClientNotInitialized(this ILogger logger);
-
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to get user {UserId} from Discord API")]
     internal static partial void UserNotFoundInApi(this ILogger logger, ulong userId);
 
@@ -85,7 +82,4 @@ internal static partial class Log
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to get SocketGuildOwner")]
     internal static partial void GuildOwnerNotFound(this ILogger logger);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to get SocketGuildUserAdmins")]
-    internal static partial void GuildAdminsNotFound(this ILogger logger);
 }

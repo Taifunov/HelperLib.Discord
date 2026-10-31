@@ -1,6 +1,7 @@
 using Discord;
 using HelperLib.Discord.Preconditions;
 using Moq;
+using static HelperLib.Discord.Tests.Mocks.DiscordMockBuilder;
 using ICommandContext = Discord.Commands.ICommandContext;
 
 namespace HelperLib.Discord.Tests.Preconditions;
@@ -39,15 +40,5 @@ public class RequireRoleAttributeTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("blocked", result.ErrorReason);
-    }
-
-    private static IReadOnlyCollection<IRole> CreateRoles(params ulong[] roleIds) =>
-        roleIds.Select(CreateRole).ToArray();
-
-    private static IRole CreateRole(ulong roleId)
-    {
-        var role = new Mock<IRole>();
-        role.Setup(r => r.Id).Returns(roleId);
-        return role.Object;
     }
 }

@@ -1,4 +1,5 @@
 using System.Net;
+using HelperLib.Discord.Tests.Mocks;
 using HelperLib.Discord.Util;
 
 namespace HelperLib.Discord.Tests.Util;
@@ -18,7 +19,7 @@ public class ImageDownloaderTests
     [InlineData("/relative.png")]
     public async Task Rejects_untrusted_urls_before_sending(string url)
     {
-        using var handler = new FakeHandler(() => throw new InvalidOperationException("Network must not be used"));
+        using var handler = new FakeHttpMessageHandler(() => throw new InvalidOperationException("Network must not be used"));
         using var downloader = new ImageDownloader(handler);
         await Assert.ThrowsAsync<ArgumentException>(() => downloader.DownloadAsync(url));
         Assert.Equal(0, handler.Requests);
@@ -29,10 +30,7 @@ public class ImageDownloaderTests
     [InlineData("media.discordapp.net")]
     public async Task Downloads_from_allowed_hosts(string host)
     {
-        using var handler = new FakeHandler(() => new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new ByteArrayContent([1, 2, 3])
-        });
+        using var handler = FakeHttpMessageHandler.Returning([1, 2, 3]);
         using var downloader = new ImageDownloader(handler);
         Assert.Equal(new byte[] { 1, 2, 3 }, await downloader.DownloadAsync($"https://{host}/image.png"));
         Assert.Equal(1, handler.Requests);
@@ -43,7 +41,7 @@ public class ImageDownloaderTests
     [InlineData(HttpStatusCode.NotFound)]
     public async Task Rejects_redirects_and_unsuccessful_responses(HttpStatusCode status)
     {
-        using var handler = new FakeHandler(() =>
+        using var handler = new FakeHttpMessageHandler(() =>
         {
             var response = new HttpResponseMessage(status);
             response.Headers.Location = new Uri("http://127.0.0.1/private");
@@ -59,7 +57,7 @@ public class ImageDownloaderTests
     [InlineData(false)]
     public async Task Rejects_oversized_bodies_even_without_content_length(bool knownLength)
     {
-        using var handler = new FakeHandler(() => new HttpResponseMessage(HttpStatusCode.OK)
+        using var handler = new FakeHttpMessageHandler(() => new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = knownLength
                 ? new ByteArrayContent(new byte[ImageDownloader.MaxImageBytes + 1])
@@ -67,17 +65,6 @@ public class ImageDownloaderTests
         });
         using var downloader = new ImageDownloader(handler);
         await Assert.ThrowsAsync<HttpRequestException>(() => downloader.DownloadAsync("https://cdn.discordapp.com/image.png"));
-    }
-
-    private sealed class FakeHandler(Func<HttpResponseMessage> response) : HttpMessageHandler
-    {
-        internal int Requests { get; private set; }
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Requests++;
-            return Task.FromResult(response());
-        }
     }
 
     private sealed class UnknownLengthContent : HttpContent

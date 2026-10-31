@@ -1,28 +1,10 @@
-using Discord;
 using HelperLib.Discord.Util;
-using Moq;
+using static HelperLib.Discord.Tests.Mocks.DiscordMockBuilder;
 
 namespace HelperLib.Discord.Tests.Util;
 
-[Collection(ConsoleAndStaticStateCollection.Name)]
 public class RoleChecksTests
 {
-    [Fact]
-    public void HasRolesAny_with_user_id_returns_false_when_guild_is_missing()
-    {
-        var hasRole = RoleChecks.HasRolesAny(123, 456, 789);
-
-        Assert.False(hasRole);
-    }
-
-    [Fact]
-    public void HasRolesAll_with_user_id_returns_false_when_guild_is_missing()
-    {
-        var hasRoles = RoleChecks.HasRolesAll(123, 456, 789);
-
-        Assert.False(hasRoles);
-    }
-
     [Fact]
     public void HasRolesAny_returns_true_when_user_has_any_requested_role()
     {
@@ -131,15 +113,5 @@ public class RoleChecksTests
         var hasRoles = RoleChecks.HasRolesAll(roles, 10, 10);
 
         Assert.True(hasRoles);
-    }
-
-    private static IReadOnlyCollection<IRole> CreateRoles(params ulong[] roleIds) =>
-        roleIds.Select(CreateRole).ToArray();
-
-    private static IRole CreateRole(ulong roleId)
-    {
-        var role = new Mock<IRole>();
-        role.Setup(r => r.Id).Returns(roleId);
-        return role.Object;
     }
 }
