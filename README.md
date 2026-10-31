@@ -156,8 +156,7 @@ dotnet test HelperLib.Discord.Tests\HelperLib.Discord.Tests.csproj --no-restore 
 The root `.editorconfig` sets the formatting, naming and analyzer rules for all C# code. Visual Studio, Rider and VS Code (C# Dev Kit) apply it while you edit.
 
 - Rules with severity `error` that the compiler or the .NET analyzers report (for example CS4014, CS8603, CA2016, CA2254) fail `dotnet build`.
-- Code-style rules (file-scoped namespaces, naming, `readonly` fields, using order, whitespace) are not checked by the build. Check them with `dotnet format`.
-- Files under `Migrations/` are generated code and are not checked.
+- Code-style rules (file-scoped namespaces, naming, `readonly` fields, unused and unordered usings, whitespace) are not checked by the build. Check them with `dotnet format`.
 
 Before you open a pull request, run:
 
