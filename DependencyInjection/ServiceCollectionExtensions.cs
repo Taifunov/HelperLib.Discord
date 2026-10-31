@@ -1,5 +1,4 @@
 using Discord.WebSocket;
-using HelperLib.Discord.Util;
 using HelperLib.Discord.Watchdog;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;

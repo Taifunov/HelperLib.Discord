@@ -2,10 +2,11 @@ using System.Diagnostics.CodeAnalysis;
 using Discord;
 using Discord.WebSocket;
 using HelperLib.Discord.Models;
+using HelperLib.Discord.Util;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace HelperLib.Discord.Util;
+namespace HelperLib.Discord;
 
 /// <summary>
 /// Looks up guilds, channels, roles, emotes and users through the host's <see cref="DiscordSocketClient"/>.
@@ -23,7 +24,8 @@ public sealed class GuildLookup
     /// <param name="options">Supplies <see cref="HelperLibDiscordOptions.DefaultGuildId"/>, read once.</param>
     /// <param name="logger">Receives the warnings of lookups that find nothing.</param>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
-    public GuildLookup(DiscordSocketClient client, IOptions<HelperLibDiscordOptions> options, ILogger<GuildLookup> logger)
+    public GuildLookup(DiscordSocketClient client, IOptions<HelperLibDiscordOptions> options,
+        ILogger<GuildLookup> logger)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(options);
@@ -71,13 +73,13 @@ public sealed class GuildLookup
         }
 
         outGuild = _client.GetGuild(resolvedGuildId);
-        if (outGuild == null)
+        if (outGuild != null)
         {
-            _logger.NoSuchGuild(resolvedGuildId);
-            return false;
+            return true;
         }
 
-        return true;
+        _logger.NoSuchGuild(resolvedGuildId);
+        return false;
     }
 
     /// <summary>Finds a channel category in a guild.</summary>
@@ -85,7 +87,8 @@ public sealed class GuildLookup
     /// <param name="categoryId">The category id.</param>
     /// <param name="outCategory">The category, or <see langword="null"/> when not found.</param>
     /// <returns><see langword="true"/> when the category was found.</returns>
-    public bool GetCategory(ulong? guildId, ulong categoryId, [NotNullWhen(true)] out SocketCategoryChannel? outCategory) =>
+    public bool GetCategory(ulong? guildId, ulong categoryId,
+        [NotNullWhen(true)] out SocketCategoryChannel? outCategory) =>
         TryFind(
             guildId,
             guild => guild.GetCategoryChannel(categoryId),
@@ -157,7 +160,8 @@ public sealed class GuildLookup
         var requestOptions = new RequestOptions { CancelToken = cancellationToken };
         return await FetchGuildUserAsync(
             _logger,
-            async () => await _client.Rest.GetGuildUserAsync(resolvedGuildId, userId, requestOptions).ConfigureAwait(false),
+            async () => await _client.Rest.GetGuildUserAsync(resolvedGuildId, userId, requestOptions)
+                .ConfigureAwait(false),
             userId,
             cancellationToken).ConfigureAwait(false);
     }
@@ -172,15 +176,16 @@ public sealed class GuildLookup
         try
         {
             var user = await fetch().ConfigureAwait(false);
-            if (user == null)
+            if (user != null)
             {
-                logger.UserNotFoundInApi(userId);
-                return null;
+                return user;
             }
 
-            return user;
+            logger.UserNotFoundInApi(userId);
+            return null;
         }
-        catch (Exception exception) when (!(exception is OperationCanceledException && cancellationToken.IsCancellationRequested))
+        catch (Exception exception) when (!(exception is OperationCanceledException &&
+                                            cancellationToken.IsCancellationRequested))
         {
             logger.UserFetchFailed(exception, userId);
             return null;
@@ -229,7 +234,10 @@ public sealed class GuildLookup
 
         var usersList = new List<IGuildUser>();
         var requestOptions = new RequestOptions { CancelToken = cancellationToken };
-        await foreach (var page in outGuild.GetUsersAsync(requestOptions).WithCancellation(cancellationToken).ConfigureAwait(false))
+        await foreach (var page in outGuild
+                           .GetUsersAsync(requestOptions)
+                           .WithCancellation(cancellationToken)
+                           .ConfigureAwait(false))
         {
             usersList.AddRange(page);
         }
@@ -252,7 +260,7 @@ public sealed class GuildLookup
     }
 
     internal static IGuildUser[] SelectAdmins(IEnumerable<IGuildUser> guildUsers) =>
-        [.. guildUsers.Where(guildUser => !guildUser.IsBot && guildUser.GuildPermissions.Administrator)];
+        [.. guildUsers.Where(guildUser => guildUser is { IsBot: false, GuildPermissions.Administrator: true })];
 
     internal static TEmote? FindEmoteByName<TEmote>(IEnumerable<TEmote> emotes, string emoteName)
         where TEmote : class, IEmote =>
@@ -266,7 +274,8 @@ public sealed class GuildLookup
         where TTarget : class
     {
         var guildFound = GetGuild(guildId, out var guild);
-        return TrySelect(_logger, guildFound, () => find(guild!), logger => logMissingTarget(logger, guild!.Id), out target);
+        return TrySelect(_logger, guildFound, () => find(guild!), logger => logMissingTarget(logger, guild!.Id),
+            out target);
     }
 
     // The guild lookup already logs a missing guild, so only a missing target is logged here.
@@ -285,12 +294,12 @@ public sealed class GuildLookup
         }
 
         target = find();
-        if (target == null)
+        if (target != null)
         {
-            logMissingTarget(logger);
-            return false;
+            return true;
         }
 
-        return true;
+        logMissingTarget(logger);
+        return false;
     }
 }

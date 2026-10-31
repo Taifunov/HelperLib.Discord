@@ -1,5 +1,5 @@
 using Discord;
-using HelperLib.Discord.Util;
+using HelperLib.Discord.Watchdog;
 using Microsoft.Extensions.Logging;
 
 namespace HelperLib.Discord.Tests.Watchdog;

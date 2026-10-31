@@ -1,7 +1,6 @@
 using Discord;
 using Discord.WebSocket;
 using HelperLib.Discord.DependencyInjection;
-using HelperLib.Discord.Util;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 

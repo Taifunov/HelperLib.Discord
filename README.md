@@ -31,7 +31,7 @@ Breaking changes must be listed in the changelog below.
 Released: in progress
 
 - Breaking: the library works only through dependency injection. Register it with `AddHelperLibDiscord`. `IonicHelper`, the static `IonicHelper.Client`, the static `GuildLookup` members, the `RoleChecks` overloads that take a guild id and a user id, and the console logger are removed. See "Migration from 1.x".
-- Breaking: `GuildLookup` is a sealed class that you inject. Its lookups are instance methods.
+- Breaking: `GuildLookup` is a sealed class that you inject. Its lookups are instance methods. It moved from the `HelperLib.Discord.Util` namespace to the root `HelperLib.Discord` namespace.
 - Breaking: removed the unused `Services.ReliabilityService`.
 - Breaking: removed `Util.MentionUtils`. Use `Discord.MentionUtils` from Discord.Net, which produces the same output.
 - Breaking: the `roleIds` parameters of `RoleChecks` changed from `params ulong[]` to `params ReadOnlySpan<ulong>`. The change is source-compatible but binary-breaking, so consumers must recompile against 2.0.0.
@@ -74,7 +74,7 @@ This is a new package with its own version history. Replace the former
 `HelperLib` package reference and update namespaces to `HelperLib.Discord`
 and its subnamespaces.
 
-- Guild/channel/user lookup methods live on `Util.GuildLookup`.
+- Guild/channel/user lookup methods live on `GuildLookup` in the root `HelperLib.Discord` namespace.
 - Role checks live on `Util.RoleChecks`.
 - `SendImageAsync` accepts only HTTPS URLs on `cdn.discordapp.com` and
   `media.discordapp.net`, rejects redirects and unsuccessful responses, and
@@ -102,7 +102,7 @@ Version 2.0.0 works only through dependency injection. Run your bot in a generic
 
 - `DependencyInjection.ServiceCollectionExtensions.AddHelperLibDiscord`: Registers the library in a host.
 - `HelperLibDiscordOptions`: Settings for the default guild and the watchdog timing.
-- `Util.GuildLookup`: Injected guild/channel/role/emote/user lookup helpers.
+- `GuildLookup`: Injected guild/channel/role/emote/user lookup helpers.
 - `Util.RoleChecks`: Static role-membership check helpers.
 - `Util.Extensions`: Extension helpers for sending `Embed`/`EmbedBuilder` and sending images from URLs.
 - `Preconditions.RequireRoleAttribute`: Discord.Commands precondition attribute that restricts usage to a role id.

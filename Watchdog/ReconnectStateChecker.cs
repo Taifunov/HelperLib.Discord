@@ -1,7 +1,8 @@
 using Discord;
+using HelperLib.Discord.Util;
 using Microsoft.Extensions.Logging;
 
-namespace HelperLib.Discord.Util;
+namespace HelperLib.Discord.Watchdog;
 
 /// <summary>
 /// Backstop logic used by HelperLib.Discord.Watchdog.ReconnectWatchdog: restart the client if it's Disconnected,
@@ -47,7 +48,7 @@ internal static class ReconnectStateChecker
             return;
         }
 
-        if (!ReconnectGuard.IsSafeToRestart(getConnectionState()))
+        if (!IsSafeToRestart(getConnectionState()))
         {
             logger.ClientAlreadyReconnecting();
             if (!await WaitForSettledStateAsync(getConnectionState, timeProvider, timeout, cancellationToken).ConfigureAwait(false))
@@ -69,7 +70,6 @@ internal static class ReconnectStateChecker
         try
         {
             connect = startAsync();
-            // Reading Exception marks it observed on every exit path, so finalization raises no UnobservedTaskException.
             _ = connect.ContinueWith(
                 static task => _ = task.Exception,
                 CancellationToken.None,
@@ -87,7 +87,6 @@ internal static class ReconnectStateChecker
             return;
         }
 
-        // StartAsync completes once the reconnect is scheduled, so it can still fault while we poll.
         if (!await WaitForConnectedOrFaultAsync(getConnectionState, connect, timeProvider, timeout, cancellationToken).ConfigureAwait(false))
         {
             TerminateUnlessCancelled("Client reset timed out.");
@@ -133,6 +132,9 @@ internal static class ReconnectStateChecker
 
     private static bool HasFailed(Task connect) => connect.IsFaulted || connect.IsCanceled;
 
+    // Discord.Net's StartAsync throws for every state other than Disconnected, including Connecting and Disconnecting.
+    private static bool IsSafeToRestart(ConnectionState state) => state == ConnectionState.Disconnected;
+
     /// <summary>
     /// Polls while the client is transiently Connecting/Disconnecting, so that a reconnect
     /// truly stuck in one of those states (rather than just slow) is still caught by the
@@ -145,7 +147,7 @@ internal static class ReconnectStateChecker
         CancellationToken cancellationToken) =>
         WaitForStateAsync(
             getConnectionState,
-            static state => ReconnectGuard.IsSafeToRestart(state) || state == ConnectionState.Connected,
+            static state => IsSafeToRestart(state) || state == ConnectionState.Connected,
             timeProvider,
             timeout,
             cancellationToken);

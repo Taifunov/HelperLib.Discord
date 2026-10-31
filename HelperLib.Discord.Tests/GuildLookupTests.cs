@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 
-namespace HelperLib.Discord.Tests.Util;
+namespace HelperLib.Discord.Tests;
 
 public class GuildLookupTests : IDisposable
 {
