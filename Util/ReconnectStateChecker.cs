@@ -102,7 +102,11 @@ internal static class ReconnectStateChecker
         var elapsed = TimeSpan.Zero;
         while (!isTargetState(getConnectionState()))
         {
-            if (elapsed >= timeout) return false;
+            if (elapsed >= timeout)
+            {
+                return false;
+            }
+
             await delayAsync(PollInterval);
             elapsed += PollInterval;
         }

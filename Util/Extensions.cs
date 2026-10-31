@@ -40,5 +40,5 @@ public static class Extensions
     }
 
     public static async Task<IUserMessage> SendImageAsync(this IMessageChannel channel, string url) =>
-        await ((ITextChannel) channel).SendImageAsync(url);
+        await ((ITextChannel)channel).SendImageAsync(url);
 }

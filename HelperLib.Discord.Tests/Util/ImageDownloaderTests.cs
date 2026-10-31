@@ -92,7 +92,9 @@ public class ImageDownloaderTests
         {
             var chunk = new byte[8192];
             for (var written = 0; written <= ImageDownloader.MaxImageBytes; written += chunk.Length)
+            {
                 await stream.WriteAsync(chunk);
+            }
         }
     }
 }
