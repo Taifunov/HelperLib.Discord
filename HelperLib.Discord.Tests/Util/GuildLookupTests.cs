@@ -1,10 +1,11 @@
-using global::Discord;
+using Discord;
 using HelperLib.Discord.Models;
 using HelperLib.Discord.Util;
 using Moq;
 
 namespace HelperLib.Discord.Tests.Util;
 
+[Collection(ConsoleAndStaticStateCollection.Name)]
 public class GuildLookupTests
 {
     [Fact]
@@ -14,6 +15,28 @@ public class GuildLookupTests
 
         Assert.False(found);
         Assert.Null(guild);
+    }
+
+    [Fact]
+    public void GetGuild_returns_false_and_reports_missing_id_when_no_guild_id_and_no_default()
+    {
+        GuildLookup.SetDefaultGuildId(null);
+
+        var (found, output) = CaptureConsoleOutput(() => GuildLookup.GetGuild(null, out _));
+
+        Assert.False(found);
+        Assert.Contains("no default guild id set", output);
+    }
+
+    [Fact]
+    public void GetRole_returns_false_and_reports_missing_id_when_no_guild_id_and_no_default()
+    {
+        GuildLookup.SetDefaultGuildId(null);
+
+        var (found, output) = CaptureConsoleOutput(() => GuildLookup.GetRole(null, 456, out _));
+
+        Assert.False(found);
+        Assert.Contains("no default guild id set", output);
     }
 
     [Fact]
@@ -76,6 +99,60 @@ public class GuildLookupTests
         var user = await GuildLookup.GetGuildUserAsync(123, 456);
 
         Assert.Null(user);
+    }
+
+    [Fact]
+    public async Task GetGuildUserAsync_returns_null_when_no_guild_id_and_no_default()
+    {
+        GuildLookup.SetDefaultGuildId(null);
+
+        var user = await GuildLookup.GetGuildUserAsync(null, 456, forceRefresh: true);
+
+        Assert.Null(user);
+    }
+
+    [Fact]
+    public async Task FetchGuildUserAsync_returns_the_fetched_user()
+    {
+        var expected = new Mock<IGuildUser>().Object;
+
+        var user = await GuildLookup.FetchGuildUserAsync(() => Task.FromResult<IGuildUser?>(expected), 456, CancellationToken.None);
+
+        Assert.Same(expected, user);
+    }
+
+    [Fact]
+    public async Task FetchGuildUserAsync_returns_null_when_fetch_throws()
+    {
+        var user = await GuildLookup.FetchGuildUserAsync(
+            () => Task.FromException<IGuildUser?>(new InvalidOperationException("boom")),
+            456,
+            CancellationToken.None);
+
+        Assert.Null(user);
+    }
+
+    [Fact]
+    public async Task FetchGuildUserAsync_returns_null_when_request_times_out_without_caller_cancellation()
+    {
+        var user = await GuildLookup.FetchGuildUserAsync(
+            () => Task.FromException<IGuildUser?>(new TaskCanceledException("HTTP timeout")),
+            456,
+            CancellationToken.None);
+
+        Assert.Null(user);
+    }
+
+    [Fact]
+    public async Task FetchGuildUserAsync_propagates_cancellation_requested_by_the_caller()
+    {
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => GuildLookup.FetchGuildUserAsync(
+            () => Task.FromException<IGuildUser?>(new OperationCanceledException(cancellation.Token)),
+            456,
+            cancellation.Token));
     }
 
     [Fact]
@@ -249,6 +326,21 @@ public class GuildLookupTests
 
         Assert.True(found);
         Assert.Equal([admin], admins);
+    }
+
+    private static (bool Result, string Output) CaptureConsoleOutput(Func<bool> action)
+    {
+        var originalOutput = Console.Out;
+        using var capturedOutput = new StringWriter();
+        Console.SetOut(capturedOutput);
+        try
+        {
+            return (action(), capturedOutput.ToString());
+        }
+        finally
+        {
+            Console.SetOut(originalOutput);
+        }
     }
 
     private static IGuildUser CreateGuildUser(bool isBot, bool administrator)

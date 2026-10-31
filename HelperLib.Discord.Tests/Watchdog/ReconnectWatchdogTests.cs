@@ -1,9 +1,11 @@
-using global::Discord;
+using Discord;
+using HelperLib.Discord.Util;
 using HelperLib.Discord.Watchdog;
 using Moq;
 
 namespace HelperLib.Discord.Tests.Watchdog;
 
+[Collection(ConsoleAndStaticStateCollection.Name)]
 public class ReconnectWatchdogTests
 {
     [Fact]
@@ -46,6 +48,50 @@ public class ReconnectWatchdogTests
         await disconnectedTask;
 
         Assert.Equal(0, startCalls);
+    }
+
+    [Fact]
+    public async Task Dispose_cancels_pending_reconnect_wait_without_checking_state()
+    {
+        var startCalls = 0;
+        var failFastCalls = 0;
+        var client = CreateClient(ConnectionState.Disconnected, () =>
+        {
+            startCalls++;
+            return Task.CompletedTask;
+        });
+        var watchdog = new ReconnectWatchdog(
+            resetTimeout: TimeSpan.FromSeconds(1),
+            delayAsync: (_, token) => Task.Delay(Timeout.InfiniteTimeSpan, token),
+            delayWithoutCancellationAsync: _ => Task.CompletedTask,
+            failFast: () => failFastCalls++);
+
+        var disconnectedTask = watchdog.ClientOnDisconnected(client.Object);
+        watchdog.Dispose();
+        await disconnectedTask;
+
+        Assert.Equal(0, startCalls);
+        Assert.Equal(0, failFastCalls);
+    }
+
+    [Fact]
+    public async Task ClientOnConnected_after_Dispose_does_not_throw()
+    {
+        var watchdog = CreateWatchdog();
+        watchdog.Dispose();
+
+        var exception = await Record.ExceptionAsync(watchdog.ClientOnConnected);
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public void Arm_after_Dispose_throws()
+    {
+        var watchdog = CreateWatchdog();
+        watchdog.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(watchdog.Arm);
     }
 
     [Fact]
@@ -248,13 +294,97 @@ public class ReconnectWatchdogTests
     }
 
     [Fact]
-    public async Task CheckStateAsync_still_fails_fast_via_timeout_when_restart_faults_asynchronously()
+    public async Task CheckStateAsync_terminates_immediately_when_restart_faults_while_waiting_for_connected()
     {
-        // IsFaulted is only checked synchronously right after StartAsync() returns.
-        // A real Discord.Net client that fails some time after StartAsync() is called
-        // (its normal failure mode) is not caught by that check, and falls through to
-        // WaitForConnectedAsync instead, timing out. The backstop still fires (failFast
-        // is still called), just via the timeout path rather than the fault path.
+        var delayCalls = 0;
+        var terminateMessages = new List<string>();
+        var logMessages = new List<string>();
+        var connectFaults = new TaskCompletionSource();
+
+        await ReconnectStateChecker.CheckStateAsync(
+            () => ConnectionState.Disconnected,
+            () => connectFaults.Task,
+            _ =>
+            {
+                delayCalls++;
+                connectFaults.TrySetException(new InvalidOperationException("boom"));
+                return Task.CompletedTask;
+            },
+            TimeSpan.FromSeconds(5),
+            logMessages.Add,
+            terminateMessages.Add);
+
+        Assert.Equal(1, delayCalls);
+        Assert.Equal(["Client reset faulted."], terminateMessages);
+        Assert.Contains(logMessages, message => message.StartsWith("Client reset faulted:") && message.Contains("boom"));
+    }
+
+    [Fact]
+    public async Task CheckStateAsync_terminates_immediately_when_restart_is_cancelled_while_waiting_for_connected()
+    {
+        var delayCalls = 0;
+        var terminateMessages = new List<string>();
+        var logMessages = new List<string>();
+        var connectCancelled = new TaskCompletionSource();
+
+        await ReconnectStateChecker.CheckStateAsync(
+            () => ConnectionState.Disconnected,
+            () => connectCancelled.Task,
+            _ =>
+            {
+                delayCalls++;
+                connectCancelled.TrySetCanceled();
+                return Task.CompletedTask;
+            },
+            TimeSpan.FromSeconds(5),
+            logMessages.Add,
+            terminateMessages.Add);
+
+        Assert.Equal(1, delayCalls);
+        Assert.Equal(["Client reset faulted."], terminateMessages);
+        Assert.Contains("Client reset was cancelled.", logMessages);
+    }
+
+    [Fact]
+    public async Task ClientOnConnected_cancels_and_disposes_the_previous_token_source()
+    {
+        var watchdog = CreateWatchdog();
+        var previousToken = watchdog.GetReconnectCancellationToken();
+
+        await watchdog.ClientOnConnected();
+
+        Assert.True(previousToken.IsCancellationRequested);
+        Assert.Throws<ObjectDisposedException>(() => previousToken.WaitHandle);
+    }
+
+    [Fact]
+    public async Task CheckStateAsync_succeeds_when_restart_faults_but_client_is_already_connected()
+    {
+        var state = ConnectionState.Disconnected;
+        var terminateMessages = new List<string>();
+        var logMessages = new List<string>();
+
+        await ReconnectStateChecker.CheckStateAsync(
+            () => state,
+            () =>
+            {
+                state = ConnectionState.Connected;
+                return Task.FromException(new InvalidOperationException("boom"));
+            },
+            _ => Task.CompletedTask,
+            TimeSpan.FromSeconds(5),
+            logMessages.Add,
+            terminateMessages.Add);
+
+        Assert.Empty(terminateMessages);
+        Assert.Contains("Client reset successfully.", logMessages);
+    }
+
+    [Fact]
+    public async Task CheckStateAsync_still_fails_fast_via_timeout_when_restart_faults_after_the_timeout()
+    {
+        // The timeout elapses before the restart task faults, so the backstop fires
+        // through the timeout path and the late fault must not matter.
         var failFastCalls = 0;
         var connectFaults = new TaskCompletionSource();
         var client = CreateClient(ConnectionState.Disconnected, () => connectFaults.Task);

@@ -1,4 +1,4 @@
-using global::Discord;
+using Discord;
 using HelperLib.Discord.Preconditions;
 using Moq;
 using ICommandContext = Discord.Commands.ICommandContext;

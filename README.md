@@ -2,7 +2,7 @@
 
 `HelperLib.Discord` is a small utility library for Discord bots built with Discord.NET. It provides convenience helpers for mentions, embeds, guild lookups, role checks, command preconditions, and basic reconnect handling.
 
-Current version: `1.0.0`
+Current version: `2.0.0`
 
 Target framework: `.NET 10`
 
@@ -25,6 +25,20 @@ This package follows semantic versioning from its first release, `1.0.0`:
 Breaking changes must be listed in the changelog below.
 
 ## Changelog
+
+### 2.0.0
+
+Released: in progress
+
+- Breaking: removed the unused `Services.ReliabilityService`. `IonicHelper` keeps its built-in reconnect watchdog.
+- Breaking: `GuildLookup.GetGuildUserAsync` and `GetGuildUsersByIdAsync` gained an optional trailing `CancellationToken`. The change is source-compatible but binary-breaking, so consumers must recompile against 2.0.0.
+- Fixed: the reconnect watchdog now terminates the process as soon as the restart task faults while it waits for the client to reconnect, instead of waiting for the timeout.
+- Fixed: `SendImageAsync` no longer throws `InvalidCastException` for DM and other non-text channels. The public `SendEmbedAsync` and `SendImageAsync` methods now throw `ArgumentNullException` or `ArgumentException` for null or blank arguments.
+- Fixed: attaching `IonicHelper` to a client again unsubscribes the previous client's watchdog handlers instead of doubling them. The watchdog's reconnect token source is now thread-safe, and an exception in the disconnect handler is logged instead of lost. `RunAsync` and `AttachToExistingClient` now throw `ArgumentNullException` for null `config`, `logger` and `client`.
+- Fixed: `GuildLookup` methods called without a guild id and without a default guild id now fail with a console message instead of looking up guild `0`. `GetGuildUserAsync` and `GetGuildUsersByIdAsync` accept an optional `CancellationToken`, and `GetGuildUserAsync` no longer swallows cancellation.
+- Added: `IonicHelper` implements `IDisposable`. `Dispose()` unsubscribes the reconnect watchdog from the attached client, cancels any pending reconnect wait and releases the watchdog's resources; it does not dispose the client. `RunAsync` and `AttachToExistingClient` throw `ObjectDisposedException` after `Dispose()`.
+- Changed: `GuildLookup.GetEmote` matches names with `OrdinalIgnoreCase` (was `InvariantCultureIgnoreCase`). `MentionUtils` formats ids culture-invariantly.
+- Build: warnings are now treated as errors, and the package ships its XML documentation.
 
 ### 1.0.0
 
@@ -57,7 +71,6 @@ and its subnamespaces.
 - `IonicHelper`: Lifecycle for a `DiscordSocketClient` — construction, login/start, cancellation token access, and reconnect watchdog wiring.
 - `Util.GuildLookup`: Static guild/channel/role/emote/user lookup helpers.
 - `Util.RoleChecks`: Static role-membership check helpers.
-- `Services.ReliabilityService`: Reconnect/reset strategy for `DiscordSocketClient`.
 - `Util.MentionUtils`: Create and parse Discord mentions for users, channels, and roles.
 - `Util.Extensions`: Extension helpers for sending `Embed`/`EmbedBuilder` and sending images from URLs.
 - `Preconditions.RequireRoleAttribute`: Discord.Commands precondition attribute that restricts usage to a role id.

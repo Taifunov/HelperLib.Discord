@@ -1,4 +1,4 @@
-using global::Discord;
+using Discord;
 using Moq;
 
 namespace HelperLib.Discord.Tests.Mocks;

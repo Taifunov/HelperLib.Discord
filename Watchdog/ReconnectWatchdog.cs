@@ -1,4 +1,4 @@
-using global::Discord;
+using Discord;
 using HelperLib.Discord.Util;
 
 namespace HelperLib.Discord.Watchdog;
@@ -7,54 +7,60 @@ internal class ReconnectWatchdog(
     TimeSpan resetTimeout,
     Func<TimeSpan, CancellationToken, Task> delayAsync,
     Func<TimeSpan, Task> delayWithoutCancellationAsync,
-    Action failFast)
+    Action failFast) : IDisposable
 {
-    private CancellationTokenSource? _reconnectCts;
+    private readonly Lock _reconnectCtsGate = new();
+    private CancellationTokenSource _reconnectCts = new();
+    private volatile bool _disposed;
 
-    internal CancellationToken GetReconnectCancellationToken() => (_reconnectCts ??= new CancellationTokenSource()).Token;
+    internal CancellationToken GetReconnectCancellationToken()
+    {
+        lock (_reconnectCtsGate)
+        {
+            return _disposed ? new CancellationToken(canceled: true) : _reconnectCts.Token;
+        }
+    }
 
-    internal void Arm() => _reconnectCts = new CancellationTokenSource();
+    internal void Arm()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        TryReplaceReconnectCts();
+    }
 
     internal Task ClientOnConnected()
     {
         Console.WriteLine("Client reconnected, resetting cancel tokens...");
 
-        _reconnectCts?.Cancel();
-        _reconnectCts = new CancellationTokenSource();
+        if (TryReplaceReconnectCts())
+        {
+            Console.WriteLine("Client reconnected, cancel tokens reset");
+        }
 
-        Console.WriteLine("Client reconnected, cancel tokens reset");
         return Task.CompletedTask;
     }
 
     internal async Task ClientOnDisconnected(IDiscordClient client)
     {
         Console.WriteLine("Client disconnected, starting timeout task...");
-        if (_reconnectCts != null)
+
+        var token = GetReconnectCancellationToken();
+        try
         {
-            var token = _reconnectCts.Token;
-            try
-            {
-                await delayAsync(resetTimeout, token);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-
-            if (token.IsCancellationRequested)
-            {
-                return;
-            }
-
-            await Task.Run(async () =>
-            {
-                Console.WriteLine("Timeout expired, continuing to check client state...");
-                await CheckStateAsync(client);
-                Console.WriteLine("State came back okay");
-            });
+            await delayAsync(resetTimeout, token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
         }
 
-        return;
+        if (token.IsCancellationRequested)
+        {
+            return;
+        }
+
+        Console.WriteLine("Timeout expired, continuing to check client state...");
+        await CheckStateAsync(client);
+        Console.WriteLine("State came back okay");
     }
 
     internal Task CheckStateAsync(IDiscordClient client) =>
@@ -69,6 +75,47 @@ internal class ReconnectWatchdog(
                 WriteColored(ConsoleColor.Red, $"{message} Killing process.");
                 failFast();
             });
+
+    public void Dispose()
+    {
+        CancellationTokenSource lastCts;
+        lock (_reconnectCtsGate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            lastCts = _reconnectCts;
+        }
+
+        CancelAndDispose(lastCts);
+    }
+
+    private bool TryReplaceReconnectCts()
+    {
+        CancellationTokenSource previousCts;
+        lock (_reconnectCtsGate)
+        {
+            if (_disposed)
+            {
+                return false;
+            }
+
+            previousCts = _reconnectCts;
+            _reconnectCts = new CancellationTokenSource();
+        }
+
+        CancelAndDispose(previousCts);
+        return true;
+    }
+
+    private static void CancelAndDispose(CancellationTokenSource cts)
+    {
+        cts.Cancel();
+        cts.Dispose();
+    }
 
     private static void WriteColored(ConsoleColor color, string message)
     {

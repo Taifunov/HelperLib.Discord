@@ -1,10 +1,9 @@
-using global::Discord;
+using Discord;
 
 namespace HelperLib.Discord.Util;
 
 /// <summary>
-/// Shared backstop logic used by both HelperLib.Discord.Watchdog.ReconnectWatchdog and
-/// HelperLib.Discord.Services.ReliabilityService: restart the client if it's Disconnected,
+/// Backstop logic used by HelperLib.Discord.Watchdog.ReconnectWatchdog: restart the client if it's Disconnected,
 /// wait out transient Connecting/Disconnecting states, and fail fast if the client
 /// never reaches Connected within the timeout.
 /// </summary>
@@ -52,31 +51,35 @@ internal static class ReconnectStateChecker
             return;
         }
 
-        if (connect.IsFaulted)
+        // StartAsync completes once the reconnect is scheduled, so it can still fault while we poll.
+        if (!await WaitForConnectedOrFaultAsync(getConnectionState, connect, delayAsync, timeout))
         {
-            log($"Client reset faulted: {connect.Exception}");
-            terminate("Client reset faulted.");
+            terminate("Client reset timed out.");
             return;
         }
 
-        if (!await WaitForConnectedAsync(getConnectionState, delayAsync, timeout))
+        if (HasFailed(connect) && getConnectionState() != ConnectionState.Connected)
         {
-            terminate("Client reset timed out.");
+            log(connect.IsFaulted ? $"Client reset faulted: {connect.Exception}" : "Client reset was cancelled.");
+            terminate("Client reset faulted.");
             return;
         }
 
         log("Client reset successfully.");
     }
 
-    private static Task<bool> WaitForConnectedAsync(
+    private static Task<bool> WaitForConnectedOrFaultAsync(
         Func<ConnectionState> getConnectionState,
+        Task connect,
         Func<TimeSpan, Task> delayAsync,
         TimeSpan timeout) =>
         WaitForStateAsync(
             getConnectionState,
-            static state => state == ConnectionState.Connected,
+            state => state == ConnectionState.Connected || HasFailed(connect),
             delayAsync,
             timeout);
+
+    private static bool HasFailed(Task connect) => connect.IsFaulted || connect.IsCanceled;
 
     /// <summary>
     /// Polls while the client is transiently Connecting/Disconnecting, so that a reconnect

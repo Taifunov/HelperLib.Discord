@@ -1,4 +1,4 @@
-using global::Discord;
+using Discord;
 using HelperLib.Discord.Util;
 using Moq;
 

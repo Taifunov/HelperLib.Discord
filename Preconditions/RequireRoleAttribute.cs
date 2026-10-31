@@ -1,13 +1,26 @@
-using global::Discord;
-using global::Discord.Commands;
-using global::Discord.WebSocket;
+using Discord;
+using Discord.Commands;
+using Discord.WebSocket;
 using HelperLib.Discord.Util;
 
 namespace HelperLib.Discord.Preconditions;
 
+/// <summary>
+/// Restricts a command or command module to guild members who hold a given role.
+/// </summary>
+/// <param name="roleId">The id of the required role.</param>
+/// <param name="errorMessage">The error returned to users who do not hold the role.</param>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, Inherited = false)]
 public class RequireRoleAttribute(ulong roleId, string errorMessage = "You are not allowed to use this command!") : PreconditionAttribute
 {
+    /// <summary>
+    /// Succeeds when the invoking user is a guild member who holds the required role.
+    /// Fails when the command is used outside a server or the user lacks the role.
+    /// </summary>
+    /// <param name="context">The command context.</param>
+    /// <param name="command">The command being checked.</param>
+    /// <param name="services">The service provider.</param>
+    /// <returns>The precondition result.</returns>
     public override async Task<PreconditionResult> CheckPermissionsAsync(
         ICommandContext context,
         CommandInfo command,

@@ -1,4 +1,4 @@
-using global::Discord;
+using Discord;
 using HelperLib.Discord.Tests.Mocks;
 using HelperLib.Discord.Util;
 using Moq;
@@ -192,11 +192,114 @@ public class ExtensionsTests
     }
 
     [Fact]
-    public async Task SendImageAsync_throws_when_message_channel_is_not_text_channel()
+    public async Task SendImageAsync_with_dm_channel_validates_url_instead_of_casting_to_text_channel()
+    {
+        var channel = DiscordMockBuilder.CreateDMChannel();
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            ((IMessageChannel)channel.Object).SendImageAsync("https://example.invalid/image.png"));
+    }
+
+    [Fact]
+    public async Task SendImageAsync_with_dm_channel_sends_downloaded_image_as_file()
+    {
+        var channel = DiscordMockBuilder.CreateDMChannel();
+        using var handler = new FakeImageHandler([1, 2, 3]);
+        using var downloader = new ImageDownloader(handler);
+        byte[]? sentBytes = null;
+        channel.Setup(c => c.SendFileAsync(
+                It.IsAny<Stream>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<bool>(),
+                It.IsAny<Embed>(),
+                It.IsAny<RequestOptions>(),
+                It.IsAny<bool>(),
+                It.IsAny<AllowedMentions>(),
+                It.IsAny<MessageReference>(),
+                It.IsAny<MessageComponent>(),
+                It.IsAny<ISticker[]>(),
+                It.IsAny<Embed[]>(),
+                It.IsAny<MessageFlags>()))
+            .Callback(new InvocationAction(invocation =>
+            {
+                using var copy = new MemoryStream();
+                ((Stream)invocation.Arguments[0]!).CopyTo(copy);
+                sentBytes = copy.ToArray();
+            }))
+            .ReturnsAsync(new Mock<IUserMessage>().Object);
+
+        await Extensions.SendImageAsync(channel.Object, "https://cdn.discordapp.com/image.png", downloader);
+
+        Assert.Equal(new byte[] { 1, 2, 3 }, sentBytes);
+        channel.Verify(c => c.SendFileAsync(
+            It.IsAny<Stream>(),
+            "image.png",
+            It.IsAny<string>(),
+            It.IsAny<bool>(),
+            It.IsAny<Embed>(),
+            It.IsAny<RequestOptions>(),
+            It.IsAny<bool>(),
+            It.IsAny<AllowedMentions>(),
+            It.IsAny<MessageReference>(),
+            It.IsAny<MessageComponent>(),
+            It.IsAny<ISticker[]>(),
+            It.IsAny<Embed[]>(),
+            It.IsAny<MessageFlags>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task SendImageAsync_rejects_missing_url(string? url)
     {
         var channel = DiscordMockBuilder.CreateMessageChannel();
 
-        await Assert.ThrowsAsync<InvalidCastException>(() =>
-            channel.Object.SendImageAsync("https://example.invalid/image.png"));
+        await Assert.ThrowsAnyAsync<ArgumentException>(() => channel.Object.SendImageAsync(url!));
+    }
+
+    [Fact]
+    public async Task SendImageAsync_rejects_null_channel()
+    {
+        IMessageChannel channel = null!;
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            channel.SendImageAsync("https://cdn.discordapp.com/image.png"));
+    }
+
+    [Fact]
+    public async Task SendEmbedAsync_rejects_null_embed()
+    {
+        var channel = DiscordMockBuilder.CreateMessageChannel();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() => channel.Object.SendEmbedAsync((Embed)null!));
+    }
+
+    [Fact]
+    public async Task SendEmbedAsync_rejects_null_embed_builder()
+    {
+        var channel = DiscordMockBuilder.CreateDMChannel();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() => channel.Object.SendEmbedAsync((EmbedBuilder)null!));
+    }
+
+    [Fact]
+    public async Task SendEmbedAsync_rejects_null_user()
+    {
+        IUser user = null!;
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            user.SendEmbedAsync(new EmbedBuilder().WithTitle("user").Build()));
+    }
+
+    private sealed class FakeImageHandler(byte[] imageBytes) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(imageBytes)
+            });
     }
 }
