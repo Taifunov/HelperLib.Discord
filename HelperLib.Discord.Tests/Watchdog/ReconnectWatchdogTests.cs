@@ -220,7 +220,7 @@ public class ReconnectWatchdogTests
             () => Task.FromException(new InvalidOperationException("boom")));
         var watchdog = new ReconnectWatchdog(
             resetTimeout: TimeSpan.FromSeconds(1),
-            delayAsync: (_, _) => Task.Delay(Timeout.InfiniteTimeSpan),
+            delayAsync: (_, _) => Task.Delay(Timeout.InfiniteTimeSpan, CancellationToken.None),
             delayWithoutCancellationAsync: _ => Task.Delay(Timeout.InfiniteTimeSpan),
             failFast: () => failFastCalls++);
 
@@ -238,7 +238,7 @@ public class ReconnectWatchdogTests
             () => throw new InvalidOperationException("boom"));
         var watchdog = new ReconnectWatchdog(
             resetTimeout: TimeSpan.FromSeconds(1),
-            delayAsync: (_, _) => Task.Delay(Timeout.InfiniteTimeSpan),
+            delayAsync: (_, _) => Task.Delay(Timeout.InfiniteTimeSpan, CancellationToken.None),
             delayWithoutCancellationAsync: _ => Task.Delay(Timeout.InfiniteTimeSpan),
             failFast: () => failFastCalls++);
 
