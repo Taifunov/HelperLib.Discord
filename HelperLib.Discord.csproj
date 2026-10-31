@@ -5,10 +5,24 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<LangVersion>latest</LangVersion>
 		<Nullable>enable</Nullable>
-		<Version>1.0.0</Version>
+		<Version>2.0.0</Version>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<Authors>Taifunov</Authors>
+		<Description>Discord.Net helpers: guild, channel, role and emote lookup, role checks, embed and image send extensions, and a reconnect watchdog that restarts the client or fails fast.</Description>
+		<PackageTags>discord;discord-net;bot;helpers;watchdog</PackageTags>
+		<PackageProjectUrl>https://github.com/Taifunov/HelperLib.Discord</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/Taifunov/HelperLib.Discord</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+		<ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+		<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<AnalysisLevel>10.0-recommended</AnalysisLevel>
+		<EmbedUntrackedSources>true</EmbedUntrackedSources>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -19,13 +33,10 @@
 
 	<ItemGroup>
 		<PackageReference Include="Discord.Net" Version="3.20.2" />
-		<PackageReference Include="Discord.Net.Commands" Version="3.20.2" />
-		<PackageReference Include="Discord.Net.WebSocket" Version="3.20.2" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<Folder Include="Services\" />
-		<Folder Include="Preconditions\" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
+		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+		<PackageReference Include="Microsoft.Extensions.Options" Version="10.0.12" />
 	</ItemGroup>
 
 	<ItemGroup>

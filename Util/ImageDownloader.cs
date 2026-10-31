@@ -18,7 +18,7 @@ internal sealed class ImageDownloader : IDisposable
         };
     }
 
-    internal async Task<byte[]> DownloadAsync(string url)
+    internal async Task<byte[]> DownloadAsync(string url, CancellationToken cancellationToken = default)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
             uri.Scheme != Uri.UriSchemeHttps || !uri.IsDefaultPort ||
@@ -29,9 +29,10 @@ internal sealed class ImageDownloader : IDisposable
         }
 
         // ResponseContentRead enforces HttpClient's buffer limit, including chunked responses.
-        using var response = await _client.GetAsync(uri, HttpCompletionOption.ResponseContentRead);
+        using var response = await _client.GetAsync(uri, HttpCompletionOption.ResponseContentRead, cancellationToken)
+            .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsByteArrayAsync();
+        return await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public void Dispose() => _client.Dispose();

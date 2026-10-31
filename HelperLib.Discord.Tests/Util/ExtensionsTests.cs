@@ -1,4 +1,4 @@
-using global::Discord;
+using Discord;
 using HelperLib.Discord.Tests.Mocks;
 using HelperLib.Discord.Util;
 using Moq;
@@ -16,17 +16,7 @@ public class ExtensionsTests
         var message = await channel.Object.SendEmbedAsync(embed);
 
         Assert.NotNull(message);
-        channel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            embed,
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        channel.VerifyEmbedSentOnce(sent => Equals(sent, embed));
     }
 
     [Fact]
@@ -37,17 +27,7 @@ public class ExtensionsTests
 
         await channel.Object.SendEmbedAsync(builder);
 
-        channel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            It.Is<Embed>(e => e.Title == "status"),
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        channel.VerifyEmbedSentOnce(sent => sent.Title == "status");
     }
 
     [Fact]
@@ -58,17 +38,7 @@ public class ExtensionsTests
 
         await channel.Object.SendEmbedAsync(embed);
 
-        channel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            embed,
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        channel.VerifyEmbedSentOnce(sent => Equals(sent, embed));
     }
 
     [Fact]
@@ -79,17 +49,7 @@ public class ExtensionsTests
 
         await channel.Object.SendEmbedAsync(builder);
 
-        channel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            It.Is<Embed>(e => e.Description == "ready"),
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        channel.VerifyEmbedSentOnce(sent => sent.Description == "ready");
     }
 
     [Fact]
@@ -100,17 +60,7 @@ public class ExtensionsTests
 
         await channel.Object.SendEmbedAsync(embed);
 
-        channel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            embed,
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        channel.VerifyEmbedSentOnce(sent => Equals(sent, embed));
     }
 
     [Fact]
@@ -121,17 +71,7 @@ public class ExtensionsTests
 
         await channel.Object.SendEmbedAsync(builder);
 
-        channel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            It.Is<Embed>(e => e.Title == "dm"),
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        channel.VerifyEmbedSentOnce(sent => sent.Title == "dm");
     }
 
     [Fact]
@@ -145,17 +85,7 @@ public class ExtensionsTests
 
         await user.Object.SendEmbedAsync(embed);
 
-        dmChannel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            embed,
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        dmChannel.VerifyEmbedSentOnce(sent => Equals(sent, embed));
     }
 
     [Fact]
@@ -169,17 +99,7 @@ public class ExtensionsTests
 
         await user.Object.SendEmbedAsync(builder);
 
-        dmChannel.Verify(c => c.SendMessageAsync(
-            string.Empty,
-            false,
-            It.Is<Embed>(e => e.Description == "user"),
-            It.IsAny<RequestOptions>(),
-            It.IsAny<AllowedMentions>(),
-            It.IsAny<MessageReference>(),
-            It.IsAny<MessageComponent>(),
-            It.IsAny<ISticker[]>(),
-            It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+        dmChannel.VerifyEmbedSentOnce(sent => sent.Description == "user");
     }
 
     [Fact]
@@ -192,11 +112,93 @@ public class ExtensionsTests
     }
 
     [Fact]
-    public async Task SendImageAsync_throws_when_message_channel_is_not_text_channel()
+    public async Task SendImageAsync_with_dm_channel_validates_url_instead_of_casting_to_text_channel()
+    {
+        var channel = DiscordMockBuilder.CreateDMChannel();
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            ((IMessageChannel)channel.Object).SendImageAsync("https://example.invalid/image.png"));
+    }
+
+    [Fact]
+    public async Task SendImageAsync_with_dm_channel_sends_downloaded_image_as_file()
+    {
+        var channel = DiscordMockBuilder.CreateDMChannel();
+        using var handler = FakeHttpMessageHandler.Returning([1, 2, 3]);
+        using var downloader = new ImageDownloader(handler);
+        using var cancellation = new CancellationTokenSource();
+        byte[]? sentBytes = null;
+        channel.SetupSendFile(bytes => sentBytes = bytes);
+
+        await Extensions.SendImageAsync(channel.Object, "https://cdn.discordapp.com/image.png", downloader,
+            cancellation.Token);
+
+        Assert.Equal(new byte[] { 1, 2, 3 }, sentBytes);
+        channel.VerifyFileSentOnce("image.png", cancellation.Token);
+    }
+
+    [Fact]
+    public async Task SendImageAsync_with_cancelled_token_stops_the_download_and_sends_nothing()
+    {
+        var channel = DiscordMockBuilder.CreateDMChannel();
+        using var handler = FakeHttpMessageHandler.Returning([1, 2, 3]);
+        using var downloader = new ImageDownloader(handler);
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            Extensions.SendImageAsync(channel.Object, "https://cdn.discordapp.com/image.png", downloader,
+                cancellation.Token));
+
+        channel.VerifyNoFileSent();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void SendImageAsync_rejects_missing_url_at_the_call(string? url)
     {
         var channel = DiscordMockBuilder.CreateMessageChannel();
 
-        await Assert.ThrowsAsync<InvalidCastException>(() =>
-            channel.Object.SendImageAsync("https://example.invalid/image.png"));
+        Assert.ThrowsAny<ArgumentException>(() => { _ = channel.Object.SendImageAsync(url!); });
+    }
+
+    [Fact]
+    public void SendImageAsync_rejects_null_channel_at_the_call()
+    {
+        IMessageChannel channel = null!;
+
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            _ = channel.SendImageAsync("https://cdn.discordapp.com/image.png");
+        });
+    }
+
+    [Fact]
+    public void SendEmbedAsync_rejects_null_embed_at_the_call()
+    {
+        var channel = DiscordMockBuilder.CreateMessageChannel();
+
+        Assert.Throws<ArgumentNullException>(() => { _ = channel.Object.SendEmbedAsync((Embed)null!); });
+    }
+
+    [Fact]
+    public void SendEmbedAsync_rejects_null_embed_builder_at_the_call()
+    {
+        var channel = DiscordMockBuilder.CreateDMChannel();
+
+        Assert.Throws<ArgumentNullException>(() => { _ = channel.Object.SendEmbedAsync((EmbedBuilder)null!); });
+    }
+
+    [Fact]
+    public void SendEmbedAsync_rejects_null_user_at_the_call()
+    {
+        IUser user = null!;
+
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            _ = user.SendEmbedAsync(new EmbedBuilder().WithTitle("user").Build());
+        });
     }
 }
