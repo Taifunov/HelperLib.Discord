@@ -31,6 +31,9 @@ jobs:
       - name: Restore
         run: dotnet restore HelperLib.Discord.sln
 
+      - name: Verify code style
+        run: dotnet format HelperLib.Discord.sln --verify-no-changes --no-restore -v q
+
       - name: Verify release scripts
         shell: pwsh
         run: ./scripts/Test-Release.ps1
