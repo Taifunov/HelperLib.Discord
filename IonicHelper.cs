@@ -2,6 +2,7 @@ using Discord;
 using Discord.WebSocket;
 using HelperLib.Discord.Util;
 using HelperLib.Discord.Watchdog;
+using Microsoft.Extensions.Logging;
 
 namespace HelperLib.Discord;
 
@@ -15,6 +16,7 @@ public class IonicHelper : IDisposable
     private static CancellationTokenSource? _tokenSource;
     private readonly string _token;
     private readonly ReconnectWatchdog _watchdog;
+    private readonly ILogger _logger;
     private bool _disposed;
     private ClientEvents? _attachedEvents;
     private Func<Exception, Task>? _disconnectedHandler;
@@ -36,14 +38,19 @@ public class IonicHelper : IDisposable
     /// </summary>
     /// <param name="token">The bot token used by <see cref="RunAsync"/>.</param>
     /// <param name="defaultGuildId">The guild used by <see cref="GuildLookup"/> when a call passes no guild id.</param>
-    public IonicHelper(string token, ulong? defaultGuildId = null)
+    /// <param name="logger">
+    /// Receives the helper's, the watchdog's and <see cref="GuildLookup"/>'s log messages; they go to the console when <see langword="null"/>.
+    /// <see cref="GuildLookup"/> is static, so it uses the logger of the last <see cref="IonicHelper"/> constructed with one.
+    /// </param>
+    public IonicHelper(string token, ulong? defaultGuildId = null, ILogger? logger = null)
         : this(
             token,
             TimeSpan.FromMinutes(1),
             Task.Delay,
             Task.Delay,
             () => Environment.Exit(1),
-            defaultGuildId)
+            defaultGuildId,
+            logger)
     {
     }
 
@@ -53,8 +60,12 @@ public class IonicHelper : IDisposable
     /// host application already owns.
     /// </summary>
     /// <param name="defaultGuildId">The guild used by <see cref="GuildLookup"/> when a call passes no guild id.</param>
-    public IonicHelper(ulong? defaultGuildId = null)
-        : this(string.Empty, defaultGuildId)
+    /// <param name="logger">
+    /// Receives the helper's, the watchdog's and <see cref="GuildLookup"/>'s log messages; they go to the console when <see langword="null"/>.
+    /// <see cref="GuildLookup"/> is static, so it uses the logger of the last <see cref="IonicHelper"/> constructed with one.
+    /// </param>
+    public IonicHelper(ulong? defaultGuildId = null, ILogger? logger = null)
+        : this(string.Empty, defaultGuildId, logger)
     {
     }
 
@@ -64,15 +75,22 @@ public class IonicHelper : IDisposable
         Func<TimeSpan, CancellationToken, Task> delayAsync,
         Func<TimeSpan, Task> delayWithoutCancellationAsync,
         Action failFast,
-        ulong? defaultGuildId = null)
+        ulong? defaultGuildId = null,
+        ILogger? logger = null)
     {
         _token = token;
+        _logger = logger ?? ConsoleLogger.Instance;
         GuildLookup.SetDefaultGuildId(defaultGuildId);
-        _watchdog = new ReconnectWatchdog(resetTimeout, delayAsync, delayWithoutCancellationAsync, failFast);
+        if (logger is not null)
+        {
+            GuildLookup.SetLogger(logger);
+        }
+
+        _watchdog = new ReconnectWatchdog(resetTimeout, delayAsync, delayWithoutCancellationAsync, failFast, _logger);
 
         if (defaultGuildId != default)
         {
-            Console.WriteLine($"Default GuildId was successfully set to: {defaultGuildId}");
+            _logger.DefaultGuildIdSet(defaultGuildId);
         }
     }
 
@@ -101,7 +119,7 @@ public class IonicHelper : IDisposable
         client.Log += logger;
         AttachClient(client, ClientEvents.For(client));
 
-        Console.WriteLine("Starting IonicHelper.");
+        _logger.StartingIonicHelper();
         await client.LoginAsync(TokenType.Bot, _token);
         await client.StartAsync();
     }
@@ -184,7 +202,7 @@ public class IonicHelper : IDisposable
         }
         catch (Exception exception)
         {
-            Console.WriteLine("Reconnect watchdog failed: {0}", exception);
+            _logger.ReconnectWatchdogFailed(exception);
         }
     }
 

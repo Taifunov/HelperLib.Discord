@@ -62,6 +62,76 @@ public class RoleChecksTests
         Assert.False(hasRoles);
     }
 
+    [Fact]
+    public void HasRolesAny_accepts_an_array_of_role_ids()
+    {
+        var roles = CreateRoles(10, 20);
+        ulong[] requestedRoleIds = [30, 20];
+
+        var hasRole = RoleChecks.HasRolesAny(roles, requestedRoleIds);
+
+        Assert.True(hasRole);
+    }
+
+    [Fact]
+    public void HasRolesAny_accepts_a_single_role_id()
+    {
+        var roles = CreateRoles(10, 20);
+
+        Assert.True(RoleChecks.HasRolesAny(roles, 10));
+        Assert.False(RoleChecks.HasRolesAny(roles, 30));
+    }
+
+    [Fact]
+    public void HasRolesAny_returns_false_when_no_role_ids_are_requested()
+    {
+        var roles = CreateRoles(10, 20);
+
+        var hasRole = RoleChecks.HasRolesAny(roles);
+
+        Assert.False(hasRole);
+    }
+
+    [Fact]
+    public void HasRolesAll_accepts_an_array_of_role_ids()
+    {
+        var roles = CreateRoles(10, 20, 30);
+        ulong[] requestedRoleIds = [30, 10];
+
+        var hasRoles = RoleChecks.HasRolesAll(roles, requestedRoleIds);
+
+        Assert.True(hasRoles);
+    }
+
+    [Fact]
+    public void HasRolesAll_accepts_a_single_role_id()
+    {
+        var roles = CreateRoles(10, 20);
+
+        Assert.True(RoleChecks.HasRolesAll(roles, 10));
+        Assert.False(RoleChecks.HasRolesAll(roles, 30));
+    }
+
+    [Fact]
+    public void HasRolesAll_returns_true_when_no_role_ids_are_requested()
+    {
+        var roles = CreateRoles(10, 20);
+
+        var hasRoles = RoleChecks.HasRolesAll(roles);
+
+        Assert.True(hasRoles);
+    }
+
+    [Fact]
+    public void HasRolesAll_returns_true_for_duplicate_requested_role_ids_the_user_holds()
+    {
+        var roles = CreateRoles(10);
+
+        var hasRoles = RoleChecks.HasRolesAll(roles, 10, 10);
+
+        Assert.True(hasRoles);
+    }
+
     private static IReadOnlyCollection<IRole> CreateRoles(params ulong[] roleIds) =>
         roleIds.Select(CreateRole).ToArray();
 

@@ -1,13 +1,21 @@
 using Discord;
 using HelperLib.Discord.Models;
 using HelperLib.Discord.Util;
+using Microsoft.Extensions.Logging;
 using Moq;
 
 namespace HelperLib.Discord.Tests.Util;
 
 [Collection(ConsoleAndStaticStateCollection.Name)]
-public class GuildLookupTests
+public class GuildLookupTests : IDisposable
 {
+    // Tests swap GuildLookup's static logger for a ListLogger; restore it so tests stay order-independent.
+    public void Dispose()
+    {
+        GuildLookup.SetLogger(ConsoleLogger.Instance);
+        GC.SuppressFinalize(this);
+    }
+
     [Fact]
     public void GetGuild_returns_false_when_client_is_not_initialized()
     {
@@ -20,23 +28,29 @@ public class GuildLookupTests
     [Fact]
     public void GetGuild_returns_false_and_reports_missing_id_when_no_guild_id_and_no_default()
     {
+        var logger = UseListLogger();
         GuildLookup.SetDefaultGuildId(null);
 
-        var (found, output) = CaptureConsoleOutput(() => GuildLookup.GetGuild(null, out _));
+        var found = GuildLookup.GetGuild(null, out _);
 
         Assert.False(found);
-        Assert.Contains("no default guild id set", output);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal("No guild id given and no default guild id set!", entry.Message);
     }
 
     [Fact]
     public void GetRole_returns_false_and_reports_missing_id_when_no_guild_id_and_no_default()
     {
+        var logger = UseListLogger();
         GuildLookup.SetDefaultGuildId(null);
 
-        var (found, output) = CaptureConsoleOutput(() => GuildLookup.GetRole(null, 456, out _));
+        var found = GuildLookup.GetRole(null, 456, out _);
 
         Assert.False(found);
-        Assert.Contains("no default guild id set", output);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal("No guild id given and no default guild id set!", entry.Message);
     }
 
     [Fact]
@@ -122,14 +136,19 @@ public class GuildLookupTests
     }
 
     [Fact]
-    public async Task FetchGuildUserAsync_returns_null_when_fetch_throws()
+    public async Task FetchGuildUserAsync_returns_null_and_logs_the_exception_when_fetch_throws()
     {
+        var logger = UseListLogger();
         var user = await GuildLookup.FetchGuildUserAsync(
             () => Task.FromException<IGuildUser?>(new InvalidOperationException("boom")),
             456,
             CancellationToken.None);
 
         Assert.Null(user);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Error, entry.Level);
+        Assert.Equal("Failed to fetch user 456 from API", entry.Message);
+        Assert.Equal("boom", entry.Exception?.Message);
     }
 
     [Fact]
@@ -258,10 +277,15 @@ public class GuildLookupTests
     [Fact]
     public void TryGetRole_returns_false_when_role_is_missing()
     {
+        var logger = UseListLogger();
+
         var found = GuildLookup.TryGetRole<IRole>(true, null, 1, 2, out var role);
 
         Assert.False(found);
         Assert.Null(role);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal("No such role 2 on guild 1", entry.Message);
     }
 
     [Fact]
@@ -328,19 +352,11 @@ public class GuildLookupTests
         Assert.Equal([admin], admins);
     }
 
-    private static (bool Result, string Output) CaptureConsoleOutput(Func<bool> action)
+    private static ListLogger UseListLogger()
     {
-        var originalOutput = Console.Out;
-        using var capturedOutput = new StringWriter();
-        Console.SetOut(capturedOutput);
-        try
-        {
-            return (action(), capturedOutput.ToString());
-        }
-        finally
-        {
-            Console.SetOut(originalOutput);
-        }
+        var logger = new ListLogger();
+        GuildLookup.SetLogger(logger);
+        return logger;
     }
 
     private static IGuildUser CreateGuildUser(bool isBot, bool administrator)

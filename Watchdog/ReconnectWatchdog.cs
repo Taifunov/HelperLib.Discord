@@ -1,5 +1,6 @@
 using Discord;
 using HelperLib.Discord.Util;
+using Microsoft.Extensions.Logging;
 
 namespace HelperLib.Discord.Watchdog;
 
@@ -7,7 +8,8 @@ internal class ReconnectWatchdog(
     TimeSpan resetTimeout,
     Func<TimeSpan, CancellationToken, Task> delayAsync,
     Func<TimeSpan, Task> delayWithoutCancellationAsync,
-    Action failFast) : IDisposable
+    Action failFast,
+    ILogger logger) : IDisposable
 {
     private readonly Lock _reconnectCtsGate = new();
     private CancellationTokenSource _reconnectCts = new();
@@ -29,11 +31,11 @@ internal class ReconnectWatchdog(
 
     internal Task ClientOnConnected()
     {
-        Console.WriteLine("Client reconnected, resetting cancel tokens...");
+        logger.ClientReconnected();
 
         if (TryReplaceReconnectCts())
         {
-            Console.WriteLine("Client reconnected, cancel tokens reset");
+            logger.CancelTokensReset();
         }
 
         return Task.CompletedTask;
@@ -41,7 +43,7 @@ internal class ReconnectWatchdog(
 
     internal async Task ClientOnDisconnected(IDiscordClient client)
     {
-        Console.WriteLine("Client disconnected, starting timeout task...");
+        logger.ClientDisconnected();
 
         var token = GetReconnectCancellationToken();
         try
@@ -58,9 +60,9 @@ internal class ReconnectWatchdog(
             return;
         }
 
-        Console.WriteLine("Timeout expired, continuing to check client state...");
+        logger.TimeoutExpired();
         await CheckStateAsync(client);
-        Console.WriteLine("State came back okay");
+        logger.StateCameBackOkay();
     }
 
     internal Task CheckStateAsync(IDiscordClient client) =>
@@ -69,10 +71,10 @@ internal class ReconnectWatchdog(
             client.StartAsync,
             delayWithoutCancellationAsync,
             resetTimeout,
-            log: message => WriteColored(ConsoleColor.Green, message),
-            terminate: message =>
+            logger,
+            terminate: reason =>
             {
-                WriteColored(ConsoleColor.Red, $"{message} Killing process.");
+                logger.KillingProcess(reason);
                 failFast();
             });
 
@@ -115,18 +117,5 @@ internal class ReconnectWatchdog(
     {
         cts.Cancel();
         cts.Dispose();
-    }
-
-    private static void WriteColored(ConsoleColor color, string message)
-    {
-        Console.ForegroundColor = color;
-        try
-        {
-            Console.WriteLine(message);
-        }
-        finally
-        {
-            Console.ForegroundColor = ConsoleColor.White;
-        }
     }
 }

@@ -1,4 +1,5 @@
 using Discord;
+using Microsoft.Extensions.Logging;
 
 namespace HelperLib.Discord.Util;
 
@@ -14,7 +15,7 @@ internal static class ReconnectStateChecker
         Func<Task> startAsync,
         Func<TimeSpan, Task> delayAsync,
         TimeSpan timeout,
-        Action<string> log,
+        ILogger logger,
         Action<string> terminate)
     {
         if (getConnectionState() == ConnectionState.Connected)
@@ -24,7 +25,7 @@ internal static class ReconnectStateChecker
 
         if (!ReconnectGuard.IsSafeToRestart(getConnectionState()))
         {
-            log("Client is already reconnecting, waiting for it to settle...");
+            logger.ClientAlreadyReconnecting();
             if (!await WaitForSettledStateAsync(getConnectionState, delayAsync, timeout))
             {
                 terminate("Client stuck reconnecting.");
@@ -37,7 +38,7 @@ internal static class ReconnectStateChecker
             }
         }
 
-        log("Attempting to reset the client");
+        logger.ResettingClient();
 
         Task connect;
         try
@@ -46,7 +47,7 @@ internal static class ReconnectStateChecker
         }
         catch (Exception ex)
         {
-            log($"Client reset faulted: {ex}");
+            logger.ClientResetFaulted(ex);
             terminate("Client reset faulted.");
             return;
         }
@@ -60,12 +61,20 @@ internal static class ReconnectStateChecker
 
         if (HasFailed(connect) && getConnectionState() != ConnectionState.Connected)
         {
-            log(connect.IsFaulted ? $"Client reset faulted: {connect.Exception}" : "Client reset was cancelled.");
+            if (connect.IsFaulted)
+            {
+                logger.ClientResetFaulted(connect.Exception);
+            }
+            else
+            {
+                logger.ClientResetCancelled();
+            }
+
             terminate("Client reset faulted.");
             return;
         }
 
-        log("Client reset successfully.");
+        logger.ClientResetSucceeded();
     }
 
     private static Task<bool> WaitForConnectedOrFaultAsync(

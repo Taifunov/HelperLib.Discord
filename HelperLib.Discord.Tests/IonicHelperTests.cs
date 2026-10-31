@@ -1,11 +1,21 @@
 using Discord;
 using Discord.WebSocket;
+using HelperLib.Discord.Util;
+using Microsoft.Extensions.Logging;
 
 namespace HelperLib.Discord.Tests;
 
 [Collection(ConsoleAndStaticStateCollection.Name)]
-public class IonicHelperTests
+public class IonicHelperTests : IDisposable
 {
+    // The constructors set GuildLookup's static logger and default guild id; reset them for the next test.
+    public void Dispose()
+    {
+        GuildLookup.SetLogger(ConsoleLogger.Instance);
+        GuildLookup.SetDefaultGuildId(null);
+        GC.SuppressFinalize(this);
+    }
+
     [Fact]
     public async Task RunAsync_throws_when_token_is_empty()
     {
@@ -126,6 +136,7 @@ public class IonicHelperTests
     [Fact]
     public async Task Disconnected_handler_logs_watchdog_failure_instead_of_throwing()
     {
+        var logger = new ListLogger();
         using var client = new DiscordSocketClient(new DiscordSocketConfig());
         // The delay throws synchronously, so the fire-and-forget watchdog finishes before the handler returns.
         var helper = new IonicHelper(
@@ -133,25 +144,52 @@ public class IonicHelperTests
             TimeSpan.FromSeconds(1),
             (_, _) => throw new InvalidOperationException("delay failed"),
             _ => Task.CompletedTask,
-            () => { });
+            () => { },
+            logger: logger);
         var events = new FakeClientEvents();
         helper.AttachClient(client, events.Events);
-        var originalOutput = Console.Out;
-        using var capturedOutput = new StringWriter();
-        Console.SetOut(capturedOutput);
 
-        try
-        {
-            await events.RaiseDisconnectedAsync();
-        }
-        finally
-        {
-            Console.SetOut(originalOutput);
-        }
+        await events.RaiseDisconnectedAsync();
 
-        var output = capturedOutput.ToString();
-        Assert.Contains("Reconnect watchdog failed", output);
-        Assert.Contains("delay failed", output);
+        var failure = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Error);
+        Assert.Equal("Reconnect watchdog failed.", failure.Message);
+        Assert.Equal("delay failed", failure.Exception?.Message);
+    }
+
+    [Fact]
+    public void Constructor_forwards_the_logger_to_GuildLookup()
+    {
+        var logger = new ListLogger();
+        using var helper = new IonicHelper(defaultGuildId: null, logger: logger);
+
+        GuildLookup.GetGuild(null, out _);
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal("No guild id given and no default guild id set!", entry.Message);
+    }
+
+    [Fact]
+    public void Constructor_without_a_logger_keeps_the_logger_GuildLookup_already_has()
+    {
+        var logger = new ListLogger();
+        GuildLookup.SetLogger(logger);
+        using var helper = new IonicHelper();
+
+        GuildLookup.GetGuild(null, out _);
+
+        Assert.Single(logger.Entries);
+    }
+
+    [Fact]
+    public void Constructor_logs_the_default_guild_id_when_one_is_given()
+    {
+        var logger = new ListLogger();
+        using var helper = new IonicHelper(123UL, logger);
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Information, entry.Level);
+        Assert.Equal("Default GuildId was successfully set to 123", entry.Message);
     }
 
     // The watchdog's delay never completes, so the client is never asked to restart.

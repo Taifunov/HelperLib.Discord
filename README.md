@@ -1,6 +1,6 @@
 # HelperLib.Discord
 
-`HelperLib.Discord` is a small utility library for Discord bots built with Discord.NET. It provides convenience helpers for mentions, embeds, guild lookups, role checks, command preconditions, and basic reconnect handling.
+`HelperLib.Discord` is a small utility library for Discord bots built with Discord.NET. It provides convenience helpers for embeds, guild lookups, role checks, command preconditions, and basic reconnect handling.
 
 Current version: `2.0.0`
 
@@ -31,13 +31,19 @@ Breaking changes must be listed in the changelog below.
 Released: in progress
 
 - Breaking: removed the unused `Services.ReliabilityService`. `IonicHelper` keeps its built-in reconnect watchdog.
+- Breaking: removed `Util.MentionUtils`. Use `Discord.MentionUtils` from Discord.Net, which produces the same output.
+- Breaking: the `roleIds` parameters of `RoleChecks` changed from `params ulong[]` to `params ReadOnlySpan<ulong>`. The change is source-compatible but binary-breaking, so consumers must recompile against 2.0.0.
+- Breaking: log output goes through `Microsoft.Extensions.Logging.ILogger` instead of `Console.WriteLine`, and the console text format changed (new wording, no fixed colors except red for errors).
+- Breaking: the `Extensions` methods now throw argument exceptions at the call instead of from the returned task.
 - Breaking: `GuildLookup.GetGuildUserAsync` and `GetGuildUsersByIdAsync` gained an optional trailing `CancellationToken`. The change is source-compatible but binary-breaking, so consumers must recompile against 2.0.0.
 - Fixed: the reconnect watchdog now terminates the process as soon as the restart task faults while it waits for the client to reconnect, instead of waiting for the timeout.
 - Fixed: `SendImageAsync` no longer throws `InvalidCastException` for DM and other non-text channels. The public `SendEmbedAsync` and `SendImageAsync` methods now throw `ArgumentNullException` or `ArgumentException` for null or blank arguments.
 - Fixed: attaching `IonicHelper` to a client again unsubscribes the previous client's watchdog handlers instead of doubling them. The watchdog's reconnect token source is now thread-safe, and an exception in the disconnect handler is logged instead of lost. `RunAsync` and `AttachToExistingClient` now throw `ArgumentNullException` for null `config`, `logger` and `client`.
-- Fixed: `GuildLookup` methods called without a guild id and without a default guild id now fail with a console message instead of looking up guild `0`. `GetGuildUserAsync` and `GetGuildUsersByIdAsync` accept an optional `CancellationToken`, and `GetGuildUserAsync` no longer swallows cancellation.
+- Fixed: `GuildLookup` methods called without a guild id and without a default guild id now fail with a logged warning instead of looking up guild `0`. `GetGuildUserAsync` and `GetGuildUsersByIdAsync` accept an optional `CancellationToken`, and `GetGuildUserAsync` no longer swallows cancellation.
+- Added: `IonicHelper` constructors accept an optional trailing `ILogger`; the helper, its reconnect watchdog and `GuildLookup` log structured messages with constant templates to it. Without a logger, the output stays on the console. `GuildLookup` is static, so it uses the logger of the last `IonicHelper` constructed with one. The change is source-compatible but binary-breaking, so consumers must recompile against 2.0.0.
+- Added: `SendImageAsync` accepts an optional trailing `CancellationToken` that cancels the download and the upload. The change is source-compatible but binary-breaking, so consumers must recompile against 2.0.0.
 - Added: `IonicHelper` implements `IDisposable`. `Dispose()` unsubscribes the reconnect watchdog from the attached client, cancels any pending reconnect wait and releases the watchdog's resources; it does not dispose the client. `RunAsync` and `AttachToExistingClient` throw `ObjectDisposedException` after `Dispose()`.
-- Changed: `GuildLookup.GetEmote` matches names with `OrdinalIgnoreCase` (was `InvariantCultureIgnoreCase`). `MentionUtils` formats ids culture-invariantly.
+- Changed: `GuildLookup.GetEmote` matches names with `OrdinalIgnoreCase` (was `InvariantCultureIgnoreCase`).
 - Build: warnings are now treated as errors, and the package ships its XML documentation.
 
 ### 1.0.0
@@ -71,7 +77,6 @@ and its subnamespaces.
 - `IonicHelper`: Lifecycle for a `DiscordSocketClient` — construction, login/start, cancellation token access, and reconnect watchdog wiring.
 - `Util.GuildLookup`: Static guild/channel/role/emote/user lookup helpers.
 - `Util.RoleChecks`: Static role-membership check helpers.
-- `Util.MentionUtils`: Create and parse Discord mentions for users, channels, and roles.
 - `Util.Extensions`: Extension helpers for sending `Embed`/`EmbedBuilder` and sending images from URLs.
 - `Preconditions.RequireRoleAttribute`: Discord.Commands precondition attribute that restricts usage to a role id.
 - `Models.GuildUsersResult`: Lightweight result type for guild user enumeration.
@@ -101,7 +106,7 @@ await helper.RunAsync(
 
 ## Examples
 
-Parse a user mention:
+Parse a user mention with Discord.Net's `MentionUtils`:
 
 ```csharp
 if (MentionUtils.TryParseUser("<@!123456>", out var userId))

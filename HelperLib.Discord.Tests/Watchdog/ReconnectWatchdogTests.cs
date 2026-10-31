@@ -1,6 +1,8 @@
 using Discord;
 using HelperLib.Discord.Util;
 using HelperLib.Discord.Watchdog;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 namespace HelperLib.Discord.Tests.Watchdog;
@@ -15,7 +17,8 @@ public class ReconnectWatchdogTests
             resetTimeout: TimeSpan.FromSeconds(1),
             delayAsync: (_, _) => Task.CompletedTask,
             delayWithoutCancellationAsync: _ => Task.CompletedTask,
-            failFast: () => { });
+            failFast: () => { },
+            logger: NullLogger.Instance);
 
         var firstToken = watchdog.GetReconnectCancellationToken();
 
@@ -40,7 +43,8 @@ public class ReconnectWatchdogTests
             resetTimeout: TimeSpan.FromSeconds(1),
             delayAsync: (_, _) => delayReleased.Task,
             delayWithoutCancellationAsync: _ => Task.Delay(Timeout.InfiniteTimeSpan),
-            failFast: () => { });
+            failFast: () => { },
+            logger: NullLogger.Instance);
 
         var disconnectedTask = watchdog.ClientOnDisconnected(client.Object);
         await watchdog.ClientOnConnected();
@@ -64,7 +68,8 @@ public class ReconnectWatchdogTests
             resetTimeout: TimeSpan.FromSeconds(1),
             delayAsync: (_, token) => Task.Delay(Timeout.InfiniteTimeSpan, token),
             delayWithoutCancellationAsync: _ => Task.CompletedTask,
-            failFast: () => failFastCalls++);
+            failFast: () => failFastCalls++,
+            logger: NullLogger.Instance);
 
         var disconnectedTask = watchdog.ClientOnDisconnected(client.Object);
         watchdog.Dispose();
@@ -124,7 +129,8 @@ public class ReconnectWatchdogTests
             resetTimeout: TimeSpan.FromSeconds(1),
             delayAsync: (_, _) => Task.CompletedTask,
             delayWithoutCancellationAsync: _ => Task.CompletedTask,
-            failFast: () => failFastCalls++);
+            failFast: () => failFastCalls++,
+            logger: NullLogger.Instance);
 
         await watchdog.CheckStateAsync(client.Object);
 
@@ -146,12 +152,32 @@ public class ReconnectWatchdogTests
             resetTimeout: TimeSpan.FromSeconds(1),
             delayAsync: (_, _) => Task.CompletedTask,
             delayWithoutCancellationAsync: _ => Task.CompletedTask,
-            failFast: () => failFastCalls++);
+            failFast: () => failFastCalls++,
+            logger: NullLogger.Instance);
 
         await watchdog.CheckStateAsync(client.Object);
 
         Assert.Equal(0, startCalls);
         Assert.Equal(1, failFastCalls);
+    }
+
+    [Fact]
+    public async Task CheckStateAsync_logs_critical_before_failing_fast()
+    {
+        var logger = new ListLogger();
+        var levelsLoggedBeforeFailFast = new List<LogLevel>();
+        var client = CreateClient(ConnectionState.Connecting, () => Task.CompletedTask);
+        var watchdog = new ReconnectWatchdog(
+            resetTimeout: TimeSpan.FromSeconds(1),
+            delayAsync: (_, _) => Task.CompletedTask,
+            delayWithoutCancellationAsync: _ => Task.CompletedTask,
+            failFast: () => levelsLoggedBeforeFailFast.AddRange(logger.Entries.Select(entry => entry.Level)),
+            logger: logger);
+
+        await watchdog.CheckStateAsync(client.Object);
+
+        Assert.Equal([LogLevel.Warning, LogLevel.Critical], levelsLoggedBeforeFailFast);
+        Assert.Equal("Client stuck reconnecting. Killing process.", logger.Entries[^1].Message);
     }
 
     [Fact]
@@ -173,7 +199,8 @@ public class ReconnectWatchdogTests
                 state = ConnectionState.Connected;
                 return Task.CompletedTask;
             },
-            failFast: () => failFastCalls++);
+            failFast: () => failFastCalls++,
+            logger: NullLogger.Instance);
 
         await watchdog.CheckStateAsync(client.Object);
 
@@ -205,7 +232,8 @@ public class ReconnectWatchdogTests
 
                 return Task.CompletedTask;
             },
-            failFast: () => failFastCalls++);
+            failFast: () => failFastCalls++,
+            logger: NullLogger.Instance);
 
         await watchdog.CheckStateAsync(client.Object);
 
@@ -233,7 +261,8 @@ public class ReconnectWatchdogTests
             resetTimeout: TimeSpan.FromSeconds(5),
             delayAsync: (_, _) => Task.CompletedTask,
             delayWithoutCancellationAsync: _ => Task.CompletedTask,
-            failFast: () => failFastCalls++);
+            failFast: () => failFastCalls++,
+            logger: NullLogger.Instance);
 
         await watchdog.CheckStateAsync(client.Object);
 
@@ -250,7 +279,8 @@ public class ReconnectWatchdogTests
             resetTimeout: TimeSpan.FromSeconds(1),
             delayAsync: (_, _) => Task.CompletedTask,
             delayWithoutCancellationAsync: _ => Task.CompletedTask,
-            failFast: () => failFastCalls++);
+            failFast: () => failFastCalls++,
+            logger: NullLogger.Instance);
 
         await watchdog.CheckStateAsync(client.Object);
 
@@ -268,7 +298,8 @@ public class ReconnectWatchdogTests
             resetTimeout: TimeSpan.FromSeconds(1),
             delayAsync: (_, _) => Task.Delay(Timeout.InfiniteTimeSpan, CancellationToken.None),
             delayWithoutCancellationAsync: _ => Task.Delay(Timeout.InfiniteTimeSpan),
-            failFast: () => failFastCalls++);
+            failFast: () => failFastCalls++,
+            logger: NullLogger.Instance);
 
         await watchdog.CheckStateAsync(client.Object);
 
@@ -286,7 +317,8 @@ public class ReconnectWatchdogTests
             resetTimeout: TimeSpan.FromSeconds(1),
             delayAsync: (_, _) => Task.Delay(Timeout.InfiniteTimeSpan, CancellationToken.None),
             delayWithoutCancellationAsync: _ => Task.Delay(Timeout.InfiniteTimeSpan),
-            failFast: () => failFastCalls++);
+            failFast: () => failFastCalls++,
+            logger: NullLogger.Instance);
 
         await watchdog.CheckStateAsync(client.Object);
 
@@ -298,7 +330,7 @@ public class ReconnectWatchdogTests
     {
         var delayCalls = 0;
         var terminateMessages = new List<string>();
-        var logMessages = new List<string>();
+        var logger = new ListLogger();
         var connectFaults = new TaskCompletionSource();
 
         await ReconnectStateChecker.CheckStateAsync(
@@ -311,12 +343,16 @@ public class ReconnectWatchdogTests
                 return Task.CompletedTask;
             },
             TimeSpan.FromSeconds(5),
-            logMessages.Add,
+            logger,
             terminateMessages.Add);
 
         Assert.Equal(1, delayCalls);
         Assert.Equal(["Client reset faulted."], terminateMessages);
-        Assert.Contains(logMessages, message => message.StartsWith("Client reset faulted:") && message.Contains("boom"));
+        Assert.Contains(
+            logger.Entries,
+            entry => entry.Level == LogLevel.Error
+                && entry.Message == "Client reset faulted."
+                && entry.Exception?.GetBaseException().Message == "boom");
     }
 
     [Fact]
@@ -324,7 +360,7 @@ public class ReconnectWatchdogTests
     {
         var delayCalls = 0;
         var terminateMessages = new List<string>();
-        var logMessages = new List<string>();
+        var logger = new ListLogger();
         var connectCancelled = new TaskCompletionSource();
 
         await ReconnectStateChecker.CheckStateAsync(
@@ -337,12 +373,14 @@ public class ReconnectWatchdogTests
                 return Task.CompletedTask;
             },
             TimeSpan.FromSeconds(5),
-            logMessages.Add,
+            logger,
             terminateMessages.Add);
 
         Assert.Equal(1, delayCalls);
         Assert.Equal(["Client reset faulted."], terminateMessages);
-        Assert.Contains("Client reset was cancelled.", logMessages);
+        Assert.Contains(
+            logger.Entries,
+            entry => entry.Level == LogLevel.Error && entry.Message == "Client reset was cancelled.");
     }
 
     [Fact]
@@ -362,7 +400,7 @@ public class ReconnectWatchdogTests
     {
         var state = ConnectionState.Disconnected;
         var terminateMessages = new List<string>();
-        var logMessages = new List<string>();
+        var logger = new ListLogger();
 
         await ReconnectStateChecker.CheckStateAsync(
             () => state,
@@ -373,11 +411,13 @@ public class ReconnectWatchdogTests
             },
             _ => Task.CompletedTask,
             TimeSpan.FromSeconds(5),
-            logMessages.Add,
+            logger,
             terminateMessages.Add);
 
         Assert.Empty(terminateMessages);
-        Assert.Contains("Client reset successfully.", logMessages);
+        Assert.Contains(
+            logger.Entries,
+            entry => entry.Level == LogLevel.Information && entry.Message == "Client reset successfully.");
     }
 
     [Fact]
@@ -392,7 +432,8 @@ public class ReconnectWatchdogTests
             resetTimeout: TimeSpan.Zero,
             delayAsync: (_, _) => Task.CompletedTask,
             delayWithoutCancellationAsync: _ => Task.CompletedTask,
-            failFast: () => failFastCalls++);
+            failFast: () => failFastCalls++,
+            logger: NullLogger.Instance);
 
         await watchdog.CheckStateAsync(client.Object);
 
@@ -406,7 +447,8 @@ public class ReconnectWatchdogTests
             resetTimeout: TimeSpan.FromSeconds(1),
             delayAsync: (_, _) => Task.CompletedTask,
             delayWithoutCancellationAsync: _ => Task.Delay(Timeout.InfiniteTimeSpan),
-            failFast: () => { });
+            failFast: () => { },
+            logger: NullLogger.Instance);
 
     private static Mock<IDiscordClient> CreateClient(
         ConnectionState connectionState,

@@ -38,13 +38,14 @@ dotnet format HelperLib.Discord.sln --verify-no-changes
 
 ## Key files
 
-- `IonicHelper.cs` — lifecycle only: constructors, `RunAsync` (login/start), static `Client`, `GetCancellationTokenSource`. Wires Discord.Net's `Connected`/`Disconnected` events to a `Watchdog.ReconnectWatchdog` instance.
+- `IonicHelper.cs` — lifecycle only: constructors, `RunAsync` (login/start), static `Client`, `GetCancellationTokenSource`. Wires Discord.Net's `Connected`/`Disconnected` events to a `Watchdog.ReconnectWatchdog` instance. The public constructors take an optional trailing `ILogger`; it goes to the watchdog and to `GuildLookup.SetLogger`.
 - `Watchdog/ReconnectWatchdog.cs` — the reconnect watchdog (`ClientOnConnected` / `ClientOnDisconnected` / `CheckStateAsync`), extracted out of `IonicHelper`. `internal`, constructed and owned by `IonicHelper`. `CheckStateAsync` delegates to `Util/ReconnectStateChecker.cs`.
 - `Util/GuildLookup.cs` — static guild/channel/role/emote/user lookup helpers (`GetGuild`, `GetTextChannel`, `GetRole`, etc., plus internal `TryGet*` helpers). Reads `IonicHelper.Client` and a default-guild-id set once from `IonicHelper`'s constructor via `GuildLookup.SetDefaultGuildId`.
+- `Util/ConsoleLogger.cs` — internal `ILogger` that writes to the console (Error and Critical in red); the default when the host supplies no logger (`ConsoleLogger.Instance`).
+- `Util/Log.cs` — all log messages as `[LoggerMessage]` source-generated extension methods on `ILogger`. Add new messages here with named placeholders; the build fails on `LogX(...)` calls (CA1848/CA1873).
 - `Util/RoleChecks.cs` — static role-membership checks (`HasRolesAny`/`HasRolesAll`). The `guildId`+`userId` overloads call into `Util/GuildLookup.cs`.
 - `Util/ReconnectGuard.cs` — shared `IsSafeToRestart(ConnectionState)` predicate used by `Util/ReconnectStateChecker.cs`.
-- `Util/ReconnectStateChecker.cs` — shared backstop logic (state check, restart, poll for Connected, fail-fast on timeout) used by `Watchdog/ReconnectWatchdog.cs`, parameterized over the caller's state getter, start delegate, delay delegate, logging, and termination action. Fix reconnect-logic bugs here.
-- `Util/MentionUtils.cs` — create/parse Discord mentions for users, channels, and roles.
+- `Util/ReconnectStateChecker.cs` — shared backstop logic (state check, restart, poll for Connected, fail-fast on timeout) used by `Watchdog/ReconnectWatchdog.cs`, parameterized over the caller's state getter, start delegate, delay delegate, `ILogger`, and termination action. Fix reconnect-logic bugs here.
 - `Util/Extensions.cs` — extension helpers for sending `Embed`/`EmbedBuilder` and images from URLs. `Util/ImageDownloader.cs` owns the shared HTTP client, restricts downloads to Discord CDN HTTPS URLs, disables redirects, and bounds response size and time.
 - `Preconditions/RequireRoleAttribute.cs` — Discord.Commands precondition attribute restricting a command to a role id. Calls `Util/RoleChecks.cs`.
 - `Models/GuildUsersResult.cs` — lightweight result type for guild user enumeration.

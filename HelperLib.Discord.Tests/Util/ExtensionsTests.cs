@@ -206,6 +206,7 @@ public class ExtensionsTests
         var channel = DiscordMockBuilder.CreateDMChannel();
         using var handler = new FakeImageHandler([1, 2, 3]);
         using var downloader = new ImageDownloader(handler);
+        using var cancellation = new CancellationTokenSource();
         byte[]? sentBytes = null;
         channel.Setup(c => c.SendFileAsync(
                 It.IsAny<Stream>(),
@@ -229,12 +230,42 @@ public class ExtensionsTests
             }))
             .ReturnsAsync(new Mock<IUserMessage>().Object);
 
-        await Extensions.SendImageAsync(channel.Object, "https://cdn.discordapp.com/image.png", downloader);
+        await Extensions.SendImageAsync(channel.Object, "https://cdn.discordapp.com/image.png", downloader,
+            cancellation.Token);
 
         Assert.Equal(new byte[] { 1, 2, 3 }, sentBytes);
         channel.Verify(c => c.SendFileAsync(
             It.IsAny<Stream>(),
             "image.png",
+            It.IsAny<string>(),
+            It.IsAny<bool>(),
+            It.IsAny<Embed>(),
+            It.Is<RequestOptions>(options => options.CancelToken == cancellation.Token),
+            It.IsAny<bool>(),
+            It.IsAny<AllowedMentions>(),
+            It.IsAny<MessageReference>(),
+            It.IsAny<MessageComponent>(),
+            It.IsAny<ISticker[]>(),
+            It.IsAny<Embed[]>(),
+            It.IsAny<MessageFlags>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SendImageAsync_with_cancelled_token_stops_the_download_and_sends_nothing()
+    {
+        var channel = DiscordMockBuilder.CreateDMChannel();
+        using var handler = new FakeImageHandler([1, 2, 3]);
+        using var downloader = new ImageDownloader(handler);
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            Extensions.SendImageAsync(channel.Object, "https://cdn.discordapp.com/image.png", downloader,
+                cancellation.Token));
+
+        channel.Verify(c => c.SendFileAsync(
+            It.IsAny<Stream>(),
+            It.IsAny<string>(),
             It.IsAny<string>(),
             It.IsAny<bool>(),
             It.IsAny<Embed>(),
@@ -245,61 +276,68 @@ public class ExtensionsTests
             It.IsAny<MessageComponent>(),
             It.IsAny<ISticker[]>(),
             It.IsAny<Embed[]>(),
-            It.IsAny<MessageFlags>()), Times.Once);
+            It.IsAny<MessageFlags>()), Times.Never);
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public async Task SendImageAsync_rejects_missing_url(string? url)
+    public void SendImageAsync_rejects_missing_url_at_the_call(string? url)
     {
         var channel = DiscordMockBuilder.CreateMessageChannel();
 
-        await Assert.ThrowsAnyAsync<ArgumentException>(() => channel.Object.SendImageAsync(url!));
+        Assert.ThrowsAny<ArgumentException>(() => { _ = channel.Object.SendImageAsync(url!); });
     }
 
     [Fact]
-    public async Task SendImageAsync_rejects_null_channel()
+    public void SendImageAsync_rejects_null_channel_at_the_call()
     {
         IMessageChannel channel = null!;
 
-        await Assert.ThrowsAsync<ArgumentNullException>(() =>
-            channel.SendImageAsync("https://cdn.discordapp.com/image.png"));
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            _ = channel.SendImageAsync("https://cdn.discordapp.com/image.png");
+        });
     }
 
     [Fact]
-    public async Task SendEmbedAsync_rejects_null_embed()
+    public void SendEmbedAsync_rejects_null_embed_at_the_call()
     {
         var channel = DiscordMockBuilder.CreateMessageChannel();
 
-        await Assert.ThrowsAsync<ArgumentNullException>(() => channel.Object.SendEmbedAsync((Embed)null!));
+        Assert.Throws<ArgumentNullException>(() => { _ = channel.Object.SendEmbedAsync((Embed)null!); });
     }
 
     [Fact]
-    public async Task SendEmbedAsync_rejects_null_embed_builder()
+    public void SendEmbedAsync_rejects_null_embed_builder_at_the_call()
     {
         var channel = DiscordMockBuilder.CreateDMChannel();
 
-        await Assert.ThrowsAsync<ArgumentNullException>(() => channel.Object.SendEmbedAsync((EmbedBuilder)null!));
+        Assert.Throws<ArgumentNullException>(() => { _ = channel.Object.SendEmbedAsync((EmbedBuilder)null!); });
     }
 
     [Fact]
-    public async Task SendEmbedAsync_rejects_null_user()
+    public void SendEmbedAsync_rejects_null_user_at_the_call()
     {
         IUser user = null!;
 
-        await Assert.ThrowsAsync<ArgumentNullException>(() =>
-            user.SendEmbedAsync(new EmbedBuilder().WithTitle("user").Build()));
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            _ = user.SendEmbedAsync(new EmbedBuilder().WithTitle("user").Build());
+        });
     }
 
     private sealed class FakeImageHandler(byte[] imageBytes) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent(imageBytes)
             });
+        }
     }
 }

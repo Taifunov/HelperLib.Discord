@@ -1,21 +1,23 @@
 using Discord;
 using Discord.WebSocket;
 using HelperLib.Discord.Models;
+using Microsoft.Extensions.Logging;
 
 namespace HelperLib.Discord.Util;
 
 /// <summary>
 /// Looks up guilds, channels, roles, emotes and users through <see cref="IonicHelper.Client"/>.
-/// The synchronous lookups return <see langword="false"/> and write a message to the console
+/// The synchronous lookups return <see langword="false"/> and log a warning
 /// when the target is missing, and work only after <see cref="IonicHelper"/> has a client.
 /// </summary>
 public static class GuildLookup
 {
-    private const string NoGuildIdMessage = "No guild id given and no default guild id set!";
-
     private static ulong? _defaultGuildId;
+    private static ILogger _logger = ConsoleLogger.Instance;
 
     internal static void SetDefaultGuildId(ulong? defaultGuildId) => _defaultGuildId = defaultGuildId;
+
+    internal static void SetLogger(ILogger logger) => _logger = logger;
 
     /// <summary>Finds a text channel in a guild.</summary>
     /// <param name="guildId">The guild id; the default guild when <see langword="null"/>.</param>
@@ -29,7 +31,7 @@ public static class GuildLookup
             guildFound,
             outGuild?.GetTextChannel(channelId),
             "text channel",
-            guildId,
+            outGuild?.Id,
             channelId,
             out channel);
     }
@@ -49,7 +51,7 @@ public static class GuildLookup
             guildFound,
             outGuild?.GetVoiceChannel(channelId),
             "voice channel",
-            guildId,
+            outGuild?.Id,
             channelId,
             out channel);
     }
@@ -63,7 +65,7 @@ public static class GuildLookup
         var targetGuildId = guildId ?? _defaultGuildId;
         if (targetGuildId is null)
         {
-            Console.WriteLine(NoGuildIdMessage);
+            _logger.NoGuildIdGiven();
             outGuild = null;
             return false;
         }
@@ -71,7 +73,7 @@ public static class GuildLookup
         var guild = IonicHelper.Client?.GetGuild(targetGuildId.Value);
         if (guild == null)
         {
-            Console.WriteLine($"No such guild \"{targetGuildId}\"!");
+            _logger.NoSuchGuild(targetGuildId.Value);
             outGuild = null;
             return false;
         }
@@ -107,7 +109,7 @@ public static class GuildLookup
     public static bool GetRole(ulong? guildId, ulong roleId, out IRole? outRole)
     {
         var guildFound = GetGuild(guildId, out var outGuild);
-        return TryGetRole(guildFound, outGuild?.GetRole(roleId), guildId, roleId, out outRole);
+        return TryGetRole(guildFound, outGuild?.GetRole(roleId), outGuild?.Id, roleId, out outRole);
     }
 
     /// <summary>Finds a custom emote in a guild by name, ignoring case.</summary>
@@ -118,7 +120,7 @@ public static class GuildLookup
     public static bool GetEmote(ulong? guildId, string emoteName, out GuildEmote? outEmote)
     {
         var guildFound = GetGuild(guildId, out var outGuild);
-        return TryGetEmote(guildFound, outGuild?.Emotes, emote => emote.Name, guildId, emoteName, out outEmote);
+        return TryGetEmote(guildFound, outGuild?.Emotes, emote => emote.Name, outGuild?.Id, emoteName, out outEmote);
     }
 
     /// <summary>Finds a guild member in the client's cache; it does not call the Discord API.</summary>
@@ -136,7 +138,7 @@ public static class GuildLookup
 
         if (outGuild?.GetUser(userId) is not { } user1)
         {
-            Console.WriteLine($"Failed to get SocketGuildUser \"{userId}\"");
+            _logger.GuildUserNotFound(userId);
             user = null;
             return false;
         }
@@ -162,7 +164,7 @@ public static class GuildLookup
         var targetGuildId = guildId ?? _defaultGuildId;
         if (targetGuildId is null)
         {
-            Console.WriteLine(NoGuildIdMessage);
+            _logger.NoGuildIdGiven();
             return null;
         }
 
@@ -175,7 +177,7 @@ public static class GuildLookup
         // Fetch from Discord REST API
         if (IonicHelper.Client == null)
         {
-            Console.WriteLine("Discord client is not initialized");
+            _logger.ClientNotInitialized();
             return null;
         }
 
@@ -198,7 +200,7 @@ public static class GuildLookup
             var user = await fetch();
             if (user == null)
             {
-                Console.WriteLine($"Failed to get user \"{userId}\" from Discord API");
+                _logger.UserNotFoundInApi(userId);
                 return null;
             }
 
@@ -206,7 +208,7 @@ public static class GuildLookup
         }
         catch (Exception ex) when (!(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))
         {
-            Console.WriteLine($"Failed to fetch user {userId} from API: {ex.Message}");
+            _logger.UserFetchFailed(ex, userId);
             return null;
         }
     }
@@ -276,7 +278,7 @@ public static class GuildLookup
 
         if (foundChannel == null)
         {
-            Console.WriteLine($"No such {channelKind} {channelId} on guild \"{guildId}\"!");
+            _logger.NoSuchChannel(channelKind, channelId, guildId);
             channel = null;
             return false;
         }
@@ -302,7 +304,7 @@ public static class GuildLookup
         var category = categories.FirstOrDefault(x => getId(x) == categoryId);
         if (category == null)
         {
-            Console.WriteLine($"No such category \"{categoryId}\"!");
+            _logger.NoSuchCategory(categoryId);
             outCategory = null;
             return false;
         }
@@ -327,7 +329,7 @@ public static class GuildLookup
 
         if (foundRole == null)
         {
-            Console.WriteLine($"No such role {roleId} on guild \"{guildId}\"");
+            _logger.NoSuchRole(roleId, guildId);
             outRole = null;
             return false;
         }
@@ -355,7 +357,7 @@ public static class GuildLookup
             getName(x).Equals(emoteName, StringComparison.OrdinalIgnoreCase));
         if (emote == null)
         {
-            Console.WriteLine($"No such emote \"{emoteName}\" on guild \"{guildId}\"");
+            _logger.NoSuchEmote(emoteName, guildId);
             outEmote = null;
             return false;
         }
@@ -372,7 +374,7 @@ public static class GuildLookup
     {
         if (!guildFound || foundOwner == null)
         {
-            Console.WriteLine("Failed to get SocketGuildOwner");
+            _logger.GuildOwnerNotFound();
             owner = null;
             return false;
         }
@@ -388,7 +390,7 @@ public static class GuildLookup
     {
         if (!guildFound || guildUsers == null)
         {
-            Console.WriteLine("Failed to get SocketGuildUserAdmins");
+            _logger.GuildAdminsNotFound();
             users = null;
             return false;
         }
