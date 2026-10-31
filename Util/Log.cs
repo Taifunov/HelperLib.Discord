@@ -14,6 +14,12 @@ internal static partial class Log
     [LoggerMessage(Level = LogLevel.Error, Message = "Reconnect watchdog failed.")]
     internal static partial void ReconnectWatchdogFailed(this ILogger logger, Exception exception);
 
+    [LoggerMessage(Level = LogLevel.Error, Message = "Stopping and disposing the client failed.")]
+    internal static partial void ClientCleanupFailed(this ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Client disconnected again while a reconnect check is running, ignoring the duplicate.")]
+    internal static partial void DuplicateDisconnectIgnored(this ILogger logger);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Client reconnected, resetting cancel tokens...")]
     internal static partial void ClientReconnected(this ILogger logger);
 

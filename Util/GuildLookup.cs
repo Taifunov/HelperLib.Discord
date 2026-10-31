@@ -12,12 +12,28 @@ namespace HelperLib.Discord.Util;
 /// </summary>
 public static class GuildLookup
 {
-    private static ulong? _defaultGuildId;
-    private static ILogger _logger = ConsoleLogger.Instance;
+    internal sealed record State(ulong? DefaultGuildId, ILogger Logger);
 
-    internal static void SetDefaultGuildId(ulong? defaultGuildId) => _defaultGuildId = defaultGuildId;
+    private static readonly Lock StateGate = new();
+    private static State _state = new(null, ConsoleLogger.Instance);
 
-    internal static void SetLogger(ILogger logger) => _logger = logger;
+    internal static State Current => Volatile.Read(ref _state);
+
+    internal static void SetDefaultGuildId(ulong? defaultGuildId)
+    {
+        lock (StateGate)
+        {
+            Volatile.Write(ref _state, _state with { DefaultGuildId = defaultGuildId });
+        }
+    }
+
+    internal static void SetLogger(ILogger logger)
+    {
+        lock (StateGate)
+        {
+            Volatile.Write(ref _state, _state with { Logger = logger });
+        }
+    }
 
     /// <summary>Finds a text channel in a guild.</summary>
     /// <param name="guildId">The guild id; the default guild when <see langword="null"/>.</param>
@@ -26,8 +42,10 @@ public static class GuildLookup
     /// <returns><see langword="true"/> when the channel was found.</returns>
     public static bool GetTextChannel(ulong? guildId, ulong channelId, out SocketTextChannel? channel)
     {
-        var guildFound = GetGuild(guildId, out var outGuild);
+        var state = Current;
+        var guildFound = FindGuild(state, guildId, out var outGuild);
         return TryGetChannel(
+            state.Logger,
             guildFound,
             outGuild?.GetTextChannel(channelId),
             "text channel",
@@ -46,8 +64,10 @@ public static class GuildLookup
         ulong channelId,
         out SocketVoiceChannel? channel)
     {
-        var guildFound = GetGuild(guildId, out var outGuild);
+        var state = Current;
+        var guildFound = FindGuild(state, guildId, out var outGuild);
         return TryGetChannel(
+            state.Logger,
             guildFound,
             outGuild?.GetVoiceChannel(channelId),
             "voice channel",
@@ -60,12 +80,15 @@ public static class GuildLookup
     /// <param name="guildId">The guild id; the default guild when <see langword="null"/>.</param>
     /// <param name="outGuild">The guild, or <see langword="null"/> when no guild id is available or the guild is unknown.</param>
     /// <returns><see langword="true"/> when the guild was found.</returns>
-    public static bool GetGuild(ulong? guildId, out SocketGuild? outGuild)
+    public static bool GetGuild(ulong? guildId, out SocketGuild? outGuild) =>
+        FindGuild(Current, guildId, out outGuild);
+
+    private static bool FindGuild(State state, ulong? guildId, out SocketGuild? outGuild)
     {
-        var targetGuildId = guildId ?? _defaultGuildId;
+        var targetGuildId = guildId ?? state.DefaultGuildId;
         if (targetGuildId is null)
         {
-            _logger.NoGuildIdGiven();
+            state.Logger.NoGuildIdGiven();
             outGuild = null;
             return false;
         }
@@ -73,7 +96,7 @@ public static class GuildLookup
         var guild = IonicHelper.Client?.GetGuild(targetGuildId.Value);
         if (guild == null)
         {
-            _logger.NoSuchGuild(targetGuildId.Value);
+            state.Logger.NoSuchGuild(targetGuildId.Value);
             outGuild = null;
             return false;
         }
@@ -92,8 +115,10 @@ public static class GuildLookup
         ulong categoryId,
         out SocketCategoryChannel? outCategory)
     {
-        var guildFound = GetGuild(guildId, out var outGuild);
+        var state = Current;
+        var guildFound = FindGuild(state, guildId, out var outGuild);
         return TryGetCategory(
+            state.Logger,
             guildFound,
             outGuild?.CategoryChannels,
             category => category.Id,
@@ -108,8 +133,9 @@ public static class GuildLookup
     /// <returns><see langword="true"/> when the role was found.</returns>
     public static bool GetRole(ulong? guildId, ulong roleId, out IRole? outRole)
     {
-        var guildFound = GetGuild(guildId, out var outGuild);
-        return TryGetRole(guildFound, outGuild?.GetRole(roleId), outGuild?.Id, roleId, out outRole);
+        var state = Current;
+        var guildFound = FindGuild(state, guildId, out var outGuild);
+        return TryGetRole(state.Logger, guildFound, outGuild?.GetRole(roleId), outGuild?.Id, roleId, out outRole);
     }
 
     /// <summary>Finds a custom emote in a guild by name, ignoring case.</summary>
@@ -119,8 +145,9 @@ public static class GuildLookup
     /// <returns><see langword="true"/> when the emote was found.</returns>
     public static bool GetEmote(ulong? guildId, string emoteName, out GuildEmote? outEmote)
     {
-        var guildFound = GetGuild(guildId, out var outGuild);
-        return TryGetEmote(guildFound, outGuild?.Emotes, emote => emote.Name, outGuild?.Id, emoteName, out outEmote);
+        var state = Current;
+        var guildFound = FindGuild(state, guildId, out var outGuild);
+        return TryGetEmote(state.Logger, guildFound, outGuild?.Emotes, emote => emote.Name, outGuild?.Id, emoteName, out outEmote);
     }
 
     /// <summary>Finds a guild member in the client's cache; it does not call the Discord API.</summary>
@@ -128,9 +155,12 @@ public static class GuildLookup
     /// <param name="userId">The user id.</param>
     /// <param name="user">The member, or <see langword="null"/> when not cached.</param>
     /// <returns><see langword="true"/> when the member was found.</returns>
-    public static bool GetGuildUserById(ulong? guildId, ulong userId, out SocketGuildUser? user)
+    public static bool GetGuildUserById(ulong? guildId, ulong userId, out SocketGuildUser? user) =>
+        FindGuildUser(Current, guildId, userId, out user);
+
+    private static bool FindGuildUser(State state, ulong? guildId, ulong userId, out SocketGuildUser? user)
     {
-        if (!GetGuild(guildId, out var outGuild))
+        if (!FindGuild(state, guildId, out var outGuild))
         {
             user = null;
             return false;
@@ -138,7 +168,7 @@ public static class GuildLookup
 
         if (outGuild?.GetUser(userId) is not { } user1)
         {
-            _logger.GuildUserNotFound(userId);
+            state.Logger.GuildUserNotFound(userId);
             user = null;
             return false;
         }
@@ -161,46 +191,50 @@ public static class GuildLookup
         bool forceRefresh = false,
         CancellationToken cancellationToken = default)
     {
-        var targetGuildId = guildId ?? _defaultGuildId;
+        var state = Current;
+        var targetGuildId = guildId ?? state.DefaultGuildId;
         if (targetGuildId is null)
         {
-            _logger.NoGuildIdGiven();
+            state.Logger.NoGuildIdGiven();
             return null;
         }
 
         // Try cache first unless forceRefresh is requested
-        if (!forceRefresh && GetGuildUserById(targetGuildId, userId, out var cachedUser))
+        if (!forceRefresh && FindGuildUser(state, targetGuildId, userId, out var cachedUser))
         {
             return cachedUser;
         }
 
         // Fetch from Discord REST API
-        if (IonicHelper.Client == null)
+        var client = IonicHelper.Client;
+        if (client == null)
         {
-            _logger.ClientNotInitialized();
+            state.Logger.ClientNotInitialized();
             return null;
         }
 
-        var rest = IonicHelper.Client.Rest;
+        var rest = client.Rest;
         var requestOptions = new RequestOptions { CancelToken = cancellationToken };
         return await FetchGuildUserAsync(
-            async () => await rest.GetGuildUserAsync(targetGuildId.Value, userId, requestOptions),
+            state.Logger,
+            async () => await rest.GetGuildUserAsync(targetGuildId.Value, userId, requestOptions).ConfigureAwait(false),
             userId,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     // An HTTP timeout surfaces as an OperationCanceledException too, so only the caller's own cancellation is rethrown.
     internal static async Task<IGuildUser?> FetchGuildUserAsync(
+        ILogger logger,
         Func<Task<IGuildUser?>> fetch,
         ulong userId,
         CancellationToken cancellationToken)
     {
         try
         {
-            var user = await fetch();
+            var user = await fetch().ConfigureAwait(false);
             if (user == null)
             {
-                _logger.UserNotFoundInApi(userId);
+                logger.UserNotFoundInApi(userId);
                 return null;
             }
 
@@ -208,7 +242,7 @@ public static class GuildLookup
         }
         catch (Exception ex) when (!(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))
         {
-            _logger.UserFetchFailed(ex, userId);
+            logger.UserFetchFailed(ex, userId);
             return null;
         }
     }
@@ -219,8 +253,9 @@ public static class GuildLookup
     /// <returns><see langword="true"/> when the owner was found.</returns>
     public static bool GetGuildOwner(ulong? guildId, out IGuildUser? owner)
     {
-        var guildFound = GetGuild(guildId, out var outGuild);
-        return TryGetGuildOwner(guildFound, outGuild?.Owner, out owner);
+        var state = Current;
+        var guildFound = FindGuild(state, guildId, out var outGuild);
+        return TryGetGuildOwner(state.Logger, guildFound, outGuild?.Owner, out owner);
 
     }
 
@@ -230,8 +265,9 @@ public static class GuildLookup
     /// <returns><see langword="true"/> when the guild's members were available.</returns>
     public static bool GetGuildAdmins(ulong? guildId, out IEnumerable<IGuildUser>? users)
     {
-        var guildFound = GetGuild(guildId, out var outGuild);
-        return TryGetGuildAdmins(guildFound, outGuild?.Users, out users);
+        var state = Current;
+        var guildFound = FindGuild(state, guildId, out var outGuild);
+        return TryGetGuildAdmins(state.Logger, guildFound, outGuild?.Users, out users);
     }
 
     /// <summary>
@@ -246,14 +282,14 @@ public static class GuildLookup
         ulong? guildId,
         CancellationToken cancellationToken = default)
     {
-        if (!GetGuild(guildId, out var outGuild))
+        if (!FindGuild(Current, guildId, out var outGuild))
         {
             return new GuildUsersResult(false, []);
         }
 
         var usersList = new List<IGuildUser>();
         var requestOptions = new RequestOptions { CancelToken = cancellationToken };
-        await foreach (var page in outGuild!.GetUsersAsync(requestOptions))
+        await foreach (var page in outGuild!.GetUsersAsync(requestOptions).ConfigureAwait(false))
         {
             usersList.AddRange(page);
         }
@@ -262,6 +298,7 @@ public static class GuildLookup
     }
 
     internal static bool TryGetChannel<TChannel>(
+        ILogger logger,
         bool guildFound,
         TChannel? foundChannel,
         string channelKind,
@@ -278,7 +315,7 @@ public static class GuildLookup
 
         if (foundChannel == null)
         {
-            _logger.NoSuchChannel(channelKind, channelId, guildId);
+            logger.NoSuchChannel(channelKind, channelId, guildId);
             channel = null;
             return false;
         }
@@ -288,6 +325,7 @@ public static class GuildLookup
     }
 
     internal static bool TryGetCategory<TCategory>(
+        ILogger logger,
         bool guildFound,
         IEnumerable<TCategory>? categories,
         Func<TCategory, ulong> getId,
@@ -304,7 +342,7 @@ public static class GuildLookup
         var category = categories.FirstOrDefault(x => getId(x) == categoryId);
         if (category == null)
         {
-            _logger.NoSuchCategory(categoryId);
+            logger.NoSuchCategory(categoryId);
             outCategory = null;
             return false;
         }
@@ -314,6 +352,7 @@ public static class GuildLookup
     }
 
     internal static bool TryGetRole<TRole>(
+        ILogger logger,
         bool guildFound,
         TRole? foundRole,
         ulong? guildId,
@@ -329,7 +368,7 @@ public static class GuildLookup
 
         if (foundRole == null)
         {
-            _logger.NoSuchRole(roleId, guildId);
+            logger.NoSuchRole(roleId, guildId);
             outRole = null;
             return false;
         }
@@ -339,6 +378,7 @@ public static class GuildLookup
     }
 
     internal static bool TryGetEmote<TEmote>(
+        ILogger logger,
         bool guildFound,
         IEnumerable<TEmote>? emotes,
         Func<TEmote, string> getName,
@@ -357,7 +397,7 @@ public static class GuildLookup
             getName(x).Equals(emoteName, StringComparison.OrdinalIgnoreCase));
         if (emote == null)
         {
-            _logger.NoSuchEmote(emoteName, guildId);
+            logger.NoSuchEmote(emoteName, guildId);
             outEmote = null;
             return false;
         }
@@ -367,6 +407,7 @@ public static class GuildLookup
     }
 
     internal static bool TryGetGuildOwner<TUser>(
+        ILogger logger,
         bool guildFound,
         TUser? foundOwner,
         out TUser? owner)
@@ -374,7 +415,7 @@ public static class GuildLookup
     {
         if (!guildFound || foundOwner == null)
         {
-            _logger.GuildOwnerNotFound();
+            logger.GuildOwnerNotFound();
             owner = null;
             return false;
         }
@@ -384,13 +425,14 @@ public static class GuildLookup
     }
 
     internal static bool TryGetGuildAdmins(
+        ILogger logger,
         bool guildFound,
         IEnumerable<IGuildUser>? guildUsers,
         out IEnumerable<IGuildUser>? users)
     {
         if (!guildFound || guildUsers == null)
         {
-            _logger.GuildAdminsNotFound();
+            logger.GuildAdminsNotFound();
             users = null;
             return false;
         }

@@ -7,7 +7,6 @@ namespace HelperLib.Discord.Watchdog;
 internal class ReconnectWatchdog(
     TimeSpan resetTimeout,
     Func<TimeSpan, CancellationToken, Task> delayAsync,
-    Func<TimeSpan, Task> delayWithoutCancellationAsync,
     Action failFast,
     ILogger logger) : IDisposable
 {
@@ -15,11 +14,13 @@ internal class ReconnectWatchdog(
     private CancellationTokenSource _reconnectCts = new();
     private volatile bool _disposed;
 
+    private CancellationToken? _runningCheckToken;
+
     internal CancellationToken GetReconnectCancellationToken()
     {
         lock (_reconnectCtsGate)
         {
-            return _disposed ? new CancellationToken(canceled: true) : _reconnectCts.Token;
+            return CurrentTokenUnderGate();
         }
     }
 
@@ -43,40 +44,94 @@ internal class ReconnectWatchdog(
 
     internal async Task ClientOnDisconnected(IDiscordClient client)
     {
-        logger.ClientDisconnected();
+        if (_disposed)
+        {
+            return;
+        }
 
-        var token = GetReconnectCancellationToken();
+        // Discord.Net raises Disconnected on every failed reconnect attempt. A second concurrent check
+        // could call StartAsync on a client that is already connecting and wrongly end the process.
+        if (!TryBeginCheck(out var token))
+        {
+            logger.DuplicateDisconnectIgnored();
+            return;
+        }
+
         try
         {
-            await delayAsync(resetTimeout, token);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
+            logger.ClientDisconnected();
 
-        if (token.IsCancellationRequested)
-        {
-            return;
-        }
+            try
+            {
+                await delayAsync(resetTimeout, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
 
-        logger.TimeoutExpired();
-        await CheckStateAsync(client);
-        logger.StateCameBackOkay();
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
+            logger.TimeoutExpired();
+            await CheckStateAsync(client, token).ConfigureAwait(false);
+            if (!token.IsCancellationRequested)
+            {
+                logger.StateCameBackOkay();
+            }
+        }
+        finally
+        {
+            EndCheck(token);
+        }
     }
 
-    internal Task CheckStateAsync(IDiscordClient client) =>
+    private bool TryBeginCheck(out CancellationToken checkToken)
+    {
+        lock (_reconnectCtsGate)
+        {
+            checkToken = CurrentTokenUnderGate();
+            // A check on an older token is already cancelled or about to be (the token swap and the
+            // cancel are not atomic), so only a check on the current token makes this event a duplicate.
+            if (_runningCheckToken == checkToken)
+            {
+                return false;
+            }
+
+            _runningCheckToken = checkToken;
+            return true;
+        }
+    }
+
+    private void EndCheck(CancellationToken checkToken)
+    {
+        lock (_reconnectCtsGate)
+        {
+            if (_runningCheckToken == checkToken)
+            {
+                _runningCheckToken = null;
+            }
+        }
+    }
+
+    private CancellationToken CurrentTokenUnderGate() =>
+        _disposed ? new CancellationToken(canceled: true) : _reconnectCts.Token;
+
+    internal Task CheckStateAsync(IDiscordClient client, CancellationToken cancellationToken = default) =>
         ReconnectStateChecker.CheckStateAsync(
             () => client.ConnectionState,
             client.StartAsync,
-            delayWithoutCancellationAsync,
+            delayAsync,
             resetTimeout,
             logger,
             terminate: reason =>
             {
                 logger.KillingProcess(reason);
                 failFast();
-            });
+            },
+            cancellationToken);
 
     public void Dispose()
     {

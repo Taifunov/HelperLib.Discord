@@ -31,7 +31,7 @@ public class RequireRoleAttribute(ulong roleId, string errorMessage = "You are n
             return PreconditionResult.FromError("This command can only be used in a server.");
         }
 
-        return await CheckRolesAsync(guildUser.Roles);
+        return await CheckRolesAsync(guildUser.Roles).ConfigureAwait(false);
     }
 
     internal Task<PreconditionResult> CheckRolesAsync(IEnumerable<IRole> roles)

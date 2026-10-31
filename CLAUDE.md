@@ -55,6 +55,11 @@ dotnet format HelperLib.Discord.sln --verify-no-changes
 - `IonicHelper` holds a **static** `DiscordSocketClient`; `GuildLookup`'s static lookup helpers only work after `RunAsync` has initialized that client. There is exactly one client per process.
 - `Watchdog/ReconnectWatchdog.cs`, used by `IonicHelper`, backstops Discord.Net's own `ConnectionManager`. Its `CheckStateAsync` logic lives in `Util/ReconnectStateChecker.cs`.
 - On unrecoverable reconnect failure, the watchdog calls `Environment.Exit(1)` in production (an injected `terminate(string)` callback in tests) so an external process host can restart the bot — this is intentional, not an error to be caught.
+- Thread-safety: `IonicHelper` instance state (`_disposed`, the attached subscription) is guarded by an instance `Lock`, so `RunAsync`/`AttachToExistingClient`/`Dispose` are serialized; nothing is awaited under a lock. The static `Client` and token source are replaced together under a static `Lock` and read with `Volatile.Read`.
+- `GuildLookup` keeps its default guild id and logger in one immutable `State` record, swapped under a lock; every public method reads `GuildLookup.Current` once and uses that snapshot for the whole call (internal `TryGet*` helpers take the logger).
+- The watchdog's single-flight slot is the running check's cancellation token, so a Connected event (which cancels it) frees the slot immediately; a finishing check clears the slot only if it still holds its own token.
+- Library awaits use `ConfigureAwait(false)` (including `await foreach`); CA2007 is an error for the library and off for `HelperLib.Discord.Tests`. Use a plain `using` for `MemoryStream`, since `await using var` cannot take `ConfigureAwait`.
+- `Client` and `GuildLookup` are process-wide statics: create ONE `IonicHelper` per process (several helpers share one client and the last attach wins).
 
 ## Watchdog gotcha
 

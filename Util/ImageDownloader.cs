@@ -29,9 +29,10 @@ internal sealed class ImageDownloader : IDisposable
         }
 
         // ResponseContentRead enforces HttpClient's buffer limit, including chunked responses.
-        using var response = await _client.GetAsync(uri, HttpCompletionOption.ResponseContentRead, cancellationToken);
+        using var response = await _client.GetAsync(uri, HttpCompletionOption.ResponseContentRead, cancellationToken)
+            .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        return await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public void Dispose() => _client.Dispose();

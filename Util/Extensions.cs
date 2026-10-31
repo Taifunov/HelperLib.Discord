@@ -120,10 +120,10 @@ public static class Extensions
     internal static async Task<IUserMessage> SendImageAsync(IMessageChannel channel, string url,
         ImageDownloader imageDownloader, CancellationToken cancellationToken = default)
     {
-        var bytes = await imageDownloader.DownloadAsync(url, cancellationToken);
-        await using var stream = new MemoryStream(bytes, writable: false);
+        var bytes = await imageDownloader.DownloadAsync(url, cancellationToken).ConfigureAwait(false);
+        using var stream = new MemoryStream(bytes, writable: false);
 
         return await channel.SendFileAsync(stream, "image.png",
-            options: new RequestOptions { CancelToken = cancellationToken });
+            options: new RequestOptions { CancelToken = cancellationToken }).ConfigureAwait(false);
     }
 }

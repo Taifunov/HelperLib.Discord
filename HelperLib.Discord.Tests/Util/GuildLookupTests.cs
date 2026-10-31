@@ -2,6 +2,7 @@ using Discord;
 using HelperLib.Discord.Models;
 using HelperLib.Discord.Util;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 namespace HelperLib.Discord.Tests.Util;
@@ -13,6 +14,7 @@ public class GuildLookupTests : IDisposable
     public void Dispose()
     {
         GuildLookup.SetLogger(ConsoleLogger.Instance);
+        GuildLookup.SetDefaultGuildId(null);
         GC.SuppressFinalize(this);
     }
 
@@ -130,7 +132,11 @@ public class GuildLookupTests : IDisposable
     {
         var expected = new Mock<IGuildUser>().Object;
 
-        var user = await GuildLookup.FetchGuildUserAsync(() => Task.FromResult<IGuildUser?>(expected), 456, CancellationToken.None);
+        var user = await GuildLookup.FetchGuildUserAsync(
+            NullLogger.Instance,
+            () => Task.FromResult<IGuildUser?>(expected),
+            456,
+            CancellationToken.None);
 
         Assert.Same(expected, user);
     }
@@ -138,8 +144,9 @@ public class GuildLookupTests : IDisposable
     [Fact]
     public async Task FetchGuildUserAsync_returns_null_and_logs_the_exception_when_fetch_throws()
     {
-        var logger = UseListLogger();
+        var logger = new ListLogger();
         var user = await GuildLookup.FetchGuildUserAsync(
+            logger,
             () => Task.FromException<IGuildUser?>(new InvalidOperationException("boom")),
             456,
             CancellationToken.None);
@@ -155,6 +162,7 @@ public class GuildLookupTests : IDisposable
     public async Task FetchGuildUserAsync_returns_null_when_request_times_out_without_caller_cancellation()
     {
         var user = await GuildLookup.FetchGuildUserAsync(
+            NullLogger.Instance,
             () => Task.FromException<IGuildUser?>(new TaskCanceledException("HTTP timeout")),
             456,
             CancellationToken.None);
@@ -169,6 +177,7 @@ public class GuildLookupTests : IDisposable
         await cancellation.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => GuildLookup.FetchGuildUserAsync(
+            NullLogger.Instance,
             () => Task.FromException<IGuildUser?>(new OperationCanceledException(cancellation.Token)),
             456,
             cancellation.Token));
@@ -204,7 +213,7 @@ public class GuildLookupTests : IDisposable
     [Fact]
     public void TryGetChannel_returns_false_when_guild_is_missing()
     {
-        var found = GuildLookup.TryGetChannel(false, new object(), "text channel", 1, 2, out object? channel);
+        var found = GuildLookup.TryGetChannel(NullLogger.Instance, false, new object(), "text channel", 1, 2, out object? channel);
 
         Assert.False(found);
         Assert.Null(channel);
@@ -213,7 +222,7 @@ public class GuildLookupTests : IDisposable
     [Fact]
     public void TryGetChannel_returns_false_when_channel_is_missing()
     {
-        var found = GuildLookup.TryGetChannel<object>(true, null, "text channel", 1, 2, out var channel);
+        var found = GuildLookup.TryGetChannel<object>(NullLogger.Instance, true, null, "text channel", 1, 2, out var channel);
 
         Assert.False(found);
         Assert.Null(channel);
@@ -224,7 +233,7 @@ public class GuildLookupTests : IDisposable
     {
         var expected = new object();
 
-        var found = GuildLookup.TryGetChannel(true, expected, "text channel", 1, 2, out var channel);
+        var found = GuildLookup.TryGetChannel(NullLogger.Instance, true, expected, "text channel", 1, 2, out var channel);
 
         Assert.True(found);
         Assert.Same(expected, channel);
@@ -234,6 +243,7 @@ public class GuildLookupTests : IDisposable
     public void TryGetCategory_returns_false_when_categories_are_missing()
     {
         var found = GuildLookup.TryGetCategory<object>(
+            NullLogger.Instance,
             true,
             null,
             _ => 0,
@@ -248,6 +258,7 @@ public class GuildLookupTests : IDisposable
     public void TryGetCategory_returns_false_when_category_id_is_not_found()
     {
         var found = GuildLookup.TryGetCategory(
+            NullLogger.Instance,
             true,
             [new LookupItem(10)],
             item => item.Id,
@@ -264,6 +275,7 @@ public class GuildLookupTests : IDisposable
         var expected = new LookupItem(20);
 
         var found = GuildLookup.TryGetCategory(
+            NullLogger.Instance,
             true,
             [new LookupItem(10), expected],
             item => item.Id,
@@ -277,9 +289,9 @@ public class GuildLookupTests : IDisposable
     [Fact]
     public void TryGetRole_returns_false_when_role_is_missing()
     {
-        var logger = UseListLogger();
+        var logger = new ListLogger();
 
-        var found = GuildLookup.TryGetRole<IRole>(true, null, 1, 2, out var role);
+        var found = GuildLookup.TryGetRole<IRole>(logger, true, null, 1, 2, out var role);
 
         Assert.False(found);
         Assert.Null(role);
@@ -293,7 +305,7 @@ public class GuildLookupTests : IDisposable
     {
         var expected = new Mock<IRole>().Object;
 
-        var found = GuildLookup.TryGetRole(true, expected, 1, 2, out var role);
+        var found = GuildLookup.TryGetRole(NullLogger.Instance, true, expected, 1, 2, out var role);
 
         Assert.True(found);
         Assert.Same(expected, role);
@@ -305,6 +317,7 @@ public class GuildLookupTests : IDisposable
         var expected = new LookupItem(1, "Wave");
 
         var found = GuildLookup.TryGetEmote(
+            NullLogger.Instance,
             true,
             [expected],
             item => item.Name,
@@ -319,7 +332,7 @@ public class GuildLookupTests : IDisposable
     [Fact]
     public void TryGetGuildOwner_returns_false_when_owner_is_missing()
     {
-        var found = GuildLookup.TryGetGuildOwner<IGuildUser>(true, null, out var owner);
+        var found = GuildLookup.TryGetGuildOwner<IGuildUser>(NullLogger.Instance, true, null, out var owner);
 
         Assert.False(found);
         Assert.Null(owner);
@@ -330,7 +343,7 @@ public class GuildLookupTests : IDisposable
     {
         var expected = new Mock<IGuildUser>().Object;
 
-        var found = GuildLookup.TryGetGuildOwner(true, expected, out var owner);
+        var found = GuildLookup.TryGetGuildOwner(NullLogger.Instance, true, expected, out var owner);
 
         Assert.True(found);
         Assert.Same(expected, owner);
@@ -344,12 +357,68 @@ public class GuildLookupTests : IDisposable
         var regularUser = CreateGuildUser(isBot: false, administrator: false);
 
         var found = GuildLookup.TryGetGuildAdmins(
+            NullLogger.Instance,
             true,
             [admin, botAdmin, regularUser],
             out var admins);
 
         Assert.True(found);
         Assert.Equal([admin], admins);
+    }
+
+    [Fact]
+    public async Task Concurrent_setters_and_readers_never_observe_a_torn_state_or_lose_an_update()
+    {
+        // Enough iterations that the writers and readers overlap instead of finishing one after another.
+        const int iterations = 20_000;
+        var firstLogger = new ListLogger();
+        var secondLogger = new ListLogger();
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tornReads = 0;
+
+        var guildIdWriter = Task.Run(async () =>
+        {
+            await start.Task;
+            for (var i = 0; i < iterations; i++)
+            {
+                GuildLookup.SetDefaultGuildId(i % 2 == 0 ? null : ulong.MaxValue);
+            }
+
+            GuildLookup.SetDefaultGuildId(42UL);
+        });
+        var loggerWriter = Task.Run(async () =>
+        {
+            await start.Task;
+            for (var i = 0; i < iterations; i++)
+            {
+                GuildLookup.SetLogger(i % 2 == 0 ? firstLogger : secondLogger);
+            }
+
+            GuildLookup.SetLogger(firstLogger);
+        });
+        var readers = Enumerable.Range(0, 2).Select(_ => Task.Run(async () =>
+        {
+            await start.Task;
+            for (var i = 0; i < iterations; i++)
+            {
+                var state = GuildLookup.Current;
+                var guildIdIsKnown = state.DefaultGuildId is null or ulong.MaxValue or 42UL;
+                var loggerIsKnown = ReferenceEquals(state.Logger, firstLogger)
+                    || ReferenceEquals(state.Logger, secondLogger)
+                    || ReferenceEquals(state.Logger, ConsoleLogger.Instance);
+                if (!guildIdIsKnown || !loggerIsKnown)
+                {
+                    Interlocked.Increment(ref tornReads);
+                }
+            }
+        })).ToArray();
+
+        start.SetResult();
+        await Task.WhenAll(readers.Append(guildIdWriter).Append(loggerWriter));
+
+        Assert.Equal(0, tornReads);
+        Assert.Equal(42UL, GuildLookup.Current.DefaultGuildId);
+        Assert.Same(firstLogger, GuildLookup.Current.Logger);
     }
 
     private static ListLogger UseListLogger()

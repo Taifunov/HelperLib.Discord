@@ -8,9 +8,10 @@ namespace HelperLib.Discord.Tests;
 [Collection(ConsoleAndStaticStateCollection.Name)]
 public class IonicHelperTests : IDisposable
 {
-    // The constructors set GuildLookup's static logger and default guild id; reset them for the next test.
+    // The constructors and attach calls set static state (logger, default guild id, client); reset it for the next test.
     public void Dispose()
     {
+        IonicHelper.Client = null;
         GuildLookup.SetLogger(ConsoleLogger.Instance);
         GuildLookup.SetDefaultGuildId(null);
         GC.SuppressFinalize(this);
@@ -60,6 +61,16 @@ public class IonicHelperTests : IDisposable
             helper.RunAsync(new DiscordSocketConfig(), null!));
 
         Assert.Equal("logger", exception.ParamName);
+    }
+
+    [Fact]
+    public async Task RunAsync_after_Dispose_throws()
+    {
+        var helper = new IonicHelper("token");
+        helper.Dispose();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+            helper.RunAsync(new DiscordSocketConfig(), _ => Task.CompletedTask));
     }
 
     [Fact]
@@ -124,6 +135,63 @@ public class IonicHelperTests : IDisposable
     }
 
     [Fact]
+    public async Task AttachClient_racing_Dispose_throws_only_ObjectDisposedException_and_leaves_no_handlers()
+    {
+        using var client = new DiscordSocketClient(new DiscordSocketConfig());
+        var helper = CreateHelper(() => { });
+        var fakes = Enumerable.Range(0, 200).Select(_ => new FakeClientEvents()).ToArray();
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var attachTasks = fakes.Select(fake => Task.Run(async () =>
+        {
+            await start.Task;
+            try
+            {
+                helper.AttachClient(client, fake.Events);
+            }
+            catch (ObjectDisposedException)
+            {
+                // Expected for attaches that lose the race against Dispose.
+            }
+        })).ToArray();
+        var disposeTask = Task.Run(async () =>
+        {
+            await start.Task;
+            helper.Dispose();
+        });
+        start.SetResult();
+        await Task.WhenAll(attachTasks.Append(disposeTask));
+
+        Assert.All(fakes, fake =>
+        {
+            Assert.Empty(fake.ConnectedHandlers);
+            Assert.Empty(fake.DisconnectedHandlers);
+        });
+    }
+
+    [Fact]
+    public async Task Dispose_called_from_many_threads_is_a_no_op_after_the_first_call()
+    {
+        using var client = new DiscordSocketClient(new DiscordSocketConfig());
+        var helper = CreateHelper(() => { });
+        var events = new FakeClientEvents();
+        helper.AttachClient(client, events.Events);
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var disposeTasks = Enumerable.Range(0, 50).Select(_ => Task.Run(async () =>
+        {
+            await start.Task;
+            helper.Dispose();
+        })).ToArray();
+        start.SetResult();
+        var exception = await Record.ExceptionAsync(() => Task.WhenAll(disposeTasks));
+
+        Assert.Null(exception);
+        Assert.Empty(events.ConnectedHandlers);
+        Assert.Empty(events.DisconnectedHandlers);
+    }
+
+    [Fact]
     public void AttachToExistingClient_after_Dispose_throws()
     {
         using var client = new DiscordSocketClient(new DiscordSocketConfig());
@@ -143,7 +211,6 @@ public class IonicHelperTests : IDisposable
             string.Empty,
             TimeSpan.FromSeconds(1),
             (_, _) => throw new InvalidOperationException("delay failed"),
-            _ => Task.CompletedTask,
             () => { },
             logger: logger);
         var events = new FakeClientEvents();
@@ -182,6 +249,19 @@ public class IonicHelperTests : IDisposable
     }
 
     [Fact]
+    public void Constructor_without_a_default_guild_id_keeps_the_current_one()
+    {
+        var logger = new ListLogger();
+        GuildLookup.SetLogger(logger);
+        GuildLookup.SetDefaultGuildId(42UL);
+        using var helper = new IonicHelper();
+
+        GuildLookup.GetGuild(null, out _);
+
+        Assert.DoesNotContain(logger.Entries, entry => entry.Message == "No guild id given and no default guild id set!");
+    }
+
+    [Fact]
     public void Constructor_logs_the_default_guild_id_when_one_is_given()
     {
         var logger = new ListLogger();
@@ -202,7 +282,6 @@ public class IonicHelperTests : IDisposable
                 onDisconnectDelayStarted();
                 return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             },
-            _ => Task.CompletedTask,
             () => { });
 
     // Discord.Net exposes no way to raise its events, so the helper subscribes through this fake instead.

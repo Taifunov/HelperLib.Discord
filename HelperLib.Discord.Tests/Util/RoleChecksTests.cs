@@ -4,6 +4,7 @@ using Moq;
 
 namespace HelperLib.Discord.Tests.Util;
 
+[Collection(ConsoleAndStaticStateCollection.Name)]
 public class RoleChecksTests
 {
     [Fact]
