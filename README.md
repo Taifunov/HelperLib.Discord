@@ -28,7 +28,7 @@ Breaking changes must be listed in the changelog below.
 
 ### 2.0.0
 
-Released: in progress
+Released: 2026-11-01
 
 - Breaking: the library works only through dependency injection. Register it with `AddHelperLibDiscord`. `IonicHelper`, the static `IonicHelper.Client`, the static `GuildLookup` members, the `RoleChecks` overloads that take a guild id and a user id, and the console logger are removed. See "Migration from 1.x".
 - Breaking: `GuildLookup` is a sealed class that you inject. Its lookups are instance methods. It moved from the `HelperLib.Discord.Util` namespace to the root `HelperLib.Discord` namespace.
