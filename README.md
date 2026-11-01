@@ -281,15 +281,21 @@ default branch.
    version. It opens a version PR and explicitly dispatches CI on that branch.
 5. Merge the version PR after `build-test-pack` passes. If the base has changed,
    update the release branch and rerun CI before merging.
-6. Run `Release package` on the default branch. It validates the merged version
-   and dated changelog, builds, tests, packs, publishes to NuGet, and tags that
-   commit. It then creates a GitHub Release with automatically generated notes
-   and the `.nupkg` attached under Assets.
+6. Merging the version PR starts `Release package` automatically on the push to
+   the default branch. It validates the merged version and dated changelog,
+   builds, tests, packs, publishes to NuGet, and tags that commit. It then
+   creates a GitHub Release with automatically generated notes and the `.nupkg`
+   attached under Assets. To retry a failed run, run `Release package` manually
+   on the default branch.
 
 Publishing uses GitHub OIDC to obtain a short-lived NuGet credential. No
-long-lived NuGet API key is stored in GitHub. Publishing is manually dispatched;
-merging a PR does not publish a package. A failed tag push can be retried on the
-same commit; an existing version tag pointing at a different commit is rejected.
+long-lived NuGet API key is stored in GitHub. A push to the default branch that
+changes `HelperLib.Discord.csproj` or `README.md` runs `Release package`. It
+publishes only when the merged version has a dated changelog and no version tag,
+or a tag on this same commit (a retry). Otherwise, it ends with a notice and publishes nothing. A failed tag push
+can be retried on the same commit; an existing version tag pointing at a
+different commit is rejected in a manual run and skipped with a notice after a
+push.
 GitHub Release creation can also be retried: missing assets are uploaded without
 overwriting existing ones, and an interrupted draft is published after upload.
 Packages are hosted on NuGet.org, not GitHub Packages. Check the `Release package`
